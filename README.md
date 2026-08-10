@@ -6,6 +6,19 @@
 > The repository currently holds the design, the decision record, and the project skeleton.
 > Implementation begins after the verification spikes in `docs/spikes/` are complete.
 > Nothing here is stable, and everything may change.
+>
+> ---
+>
+> **⚠️ Not affiliated with Microsoft.**
+> This project has **no connection whatsoever** to Microsoft Corporation, to
+> Microsoft's discontinued Cortana assistant, or to the Halo video game series.
+> "Cortana" is a registered trademark of Microsoft Corporation. This is an
+> independent, non-commercial, open-source project by an unrelated individual,
+> and the name implies no endorsement, sponsorship, or association of any kind.
+>
+> It is likewise **not affiliated with Anthropic PBC**. It is a third-party
+> harness you run on your own machine, against your own account. See
+> [NOTICE](NOTICE) for the full statement.
 
 ---
 
@@ -73,7 +86,7 @@ These are invariants. A design that violates one is wrong, not merely different.
 
 ## Project layout
 
-```
+```text
 packages/     the framework — kernel, runtime, memory, policy, audit, modules
 docs/         concepts, architecture decision records, spike reports
 spikes/       throwaway verification scripts; never merged into packages/
