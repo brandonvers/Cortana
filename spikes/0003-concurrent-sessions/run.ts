@@ -3,19 +3,26 @@
  *
  * Throwaway. See README.md for the pass criteria, written down before this ran.
  *
- * Two things about the design are deliberate and worth knowing before reading:
+ * Three things about the design are deliberate, and each is here because an
+ * earlier version got it wrong:
  *
  * 1. `startup()` spawns the subprocess and completes its initialize handshake
  *    WITHOUT sending a prompt. So the memory question — the one the topology
  *    decision actually rests on — costs nothing at all and scales to any number
- *    of sessions for free. Only the latency questions need model turns, and they
- *    need three of them however many sessions we measure.
+ *    of sessions for free. A first draft sent a prompt per session, cost ten
+ *    times as much, and told us no more.
  *
  * 2. A turn cannot be read by breaking out of `for await`. Breaking calls the
  *    generator's return(), which ends the session — so a "long-lived" session
  *    measured that way is already dead by the second turn. Each session
  *    therefore runs a background consumer that stays subscribed for the
  *    session's whole life and hands each completed turn back through a promise.
+ *
+ * 3. Latency is measured as an experiment, not as three anecdotes. Provider
+ *    latency varies by a factor of three between runs, so a single sample per
+ *    condition decides the verdict by coin toss — which it did, twice, in
+ *    opposite directions. All three conditions are now sampled over interleaved
+ *    rounds and compared by median.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -32,6 +39,17 @@ const WARM_SAMPLES = Number(process.env['WARM_SAMPLES'] ?? 5);
 
 /** Absolute budget for a warm turn, in milliseconds. */
 const WARM_BUDGET_MS = Number(process.env['WARM_BUDGET_MS'] ?? 3000);
+
+/**
+ * Rounds of the latency experiment. Each round samples all three conditions, so
+ * this is also the sample count per condition. One sample of a noisy quantity is
+ * an anecdote, and provider latency here varies by a factor of three.
+ */
+const ROUNDS = Number(process.env['ROUNDS'] ?? 5);
+
+/** Absolute budgets, in milliseconds. Compared against medians, never a sample. */
+const WARM_BUDGET_MS = Number(process.env['WARM_BUDGET_MS'] ?? 3000);
+const WAKE_BUDGET_MS = Number(process.env['WAKE_BUDGET_MS'] ?? 3000);
 
 /**
  * A short custom system prompt rather than the full agent preset. Tool
@@ -287,73 +305,83 @@ async function main(): Promise<void> {
     `${perSession.toFixed(0)} MB each; 12 → ${((perSession * 12) / 1024).toFixed(1)} GB of ${totalGb.toFixed(0)} GB`,
   );
 
-  // Keep one pre-warmed handle for the wake measurement; discard the rest.
-  const forWake = warm.pop();
   for (const w of warm) w.close();
   await new Promise((r) => setTimeout(r, 1000));
 
   // -------------------------------------------------------------------------
-  // PHASE 2 — latency. Three turns total, whatever SESSIONS is.
+  // PHASE 2 — latency, measured as an experiment rather than three anecdotes.
+  //
+  // Earlier versions sampled each condition once and compared the samples. That
+  // was wrong in a way three runs made obvious: cold start came back at 8,524 ms,
+  // 5,331 ms and 2,841 ms for identical work, and the pre-warmed wake at 1,743,
+  // 1,874 and 4,623 ms. Against that much variance a single sample per condition
+  // decides the verdict by coin toss, and it did — twice, in opposite directions.
+  //
+  // So all three conditions are sampled, and the rounds are INTERLEAVED: a
+  // period of provider slowness lands on cold, warm and pre-warmed alike instead
+  // of biasing whichever happened to run during it. Each round's pre-warmed
+  // handle is created at the round's START and queried at its END, giving every
+  // wake sample the same realistic idle gap — a dormant agent pre-warmed some
+  // seconds ago, not one queried the instant its process appeared.
   // -------------------------------------------------------------------------
   let spent = 0;
+  const cold: number[] = [];
+  const warmTurns: number[] = [];
+  const wake: number[] = [];
+  let modelSeen = 'unknown';
 
-  section('cold start, then a second turn on the same session');
-  const session = new Session(baseOptions());
-  const cold = await session.ask(PROBE);
-  spent += cold.costUsd;
-  console.log(`  cold turn       first token ${ms(cold.firstTokenMs)}  complete ${ms(cold.totalMs)}`);
-  console.log(`  model used      ${cold.models}`);
+  section(`latency: ${ROUNDS} interleaved round${ROUNDS === 1 ? '' : 's'} of cold / warm / pre-warmed`);
+  for (let round = 0; round < ROUNDS; round++) {
+    const prewarmed = await startup({ options: baseOptions() });
 
-  // Criterion 3 originally compared the warm turn against 40% of a single cold
-  // start. That was a bad test and the first run proved it: cold start varied by
-  // 60% between runs for identical work, so the bar moved with the noise, and a
-  // run whose warm turn was FASTER in absolute terms failed by eight
-  // milliseconds because its cold sample happened to be quick.
-  //
-  // The replacement is an absolute budget over a median of several samples,
-  // which is what the ratio was standing in for and is stricter where it counts.
-  const warmSamples: number[] = [];
-  for (let i = 0; i < WARM_SAMPLES; i++) {
-    const t = await session.ask(PROBE);
-    spent += t.costUsd;
-    warmSamples.push(t.totalMs);
-    console.log(`  warm turn ${String(i + 1).padStart(2)}    first token ${ms(t.firstTokenMs)}  complete ${ms(t.totalMs)}`);
-  }
-  const warmMedian =
-    [...warmSamples].sort((a, b) => a - b)[Math.floor(warmSamples.length / 2)] ?? Number.NaN;
-  console.log(`  warm median     ${ms(warmMedian)} over ${warmSamples.length} samples`);
-  console.log(`  cold reference  ${ms(cold.totalMs)} (single sample, high variance)`);
+    const session = new Session(baseOptions());
+    const c = await session.ask(PROBE);
+    spent += c.costUsd;
+    cold.push(c.totalMs);
+    if (c.models !== 'unknown') modelSeen = c.models;
 
-  check(
-    '3 warm turn under 3 s',
-    warmMedian < WARM_BUDGET_MS,
-    `median ${ms(warmMedian)} (threshold ${WARM_BUDGET_MS} ms)`,
-  );
+    const w = await session.ask(PROBE);
+    spent += w.costUsd;
+    warmTurns.push(w.totalMs);
+    await session.close();
 
-  await session.close();
-
-  // -------------------------------------------------------------------------
-  section('waking a dormant agent that was pre-warmed');
-  let wake: Turn | null = null;
-  if (forWake) {
     const t0 = performance.now();
-    const wq = forWake.query(PROBE) as unknown as AsyncGenerator<unknown>;
-    wake = await readWarmTurn(wq, t0);
-    spent += wake.costUsd;
-    console.log(`  pre-warmed      first token ${ms(wake.firstTokenMs)}  complete ${ms(wake.totalMs)}`);
-    console.log(`  cold reference  ${ms(cold.totalMs)}`);
+    const pq = prewarmed.query(PROBE) as unknown as AsyncGenerator<unknown>;
+    const p = await readWarmTurn(pq, t0);
+    spent += p.costUsd;
+    wake.push(p.totalMs);
+
+    console.log(
+      `  round ${String(round + 1).padStart(2)}       cold ${ms(c.totalMs).padStart(8)}   warm ${ms(w.totalMs).padStart(8)}   pre-warmed ${ms(p.totalMs).padStart(8)}`,
+    );
   }
-  check('4 wake under 3 s', (wake?.totalMs ?? Infinity) < 3000, `${ms(wake?.totalMs ?? Number.NaN)} (threshold 3000 ms)`);
+
+  console.log(`  model used      ${modelSeen}`);
+  console.log('');
+  const stats = (label: string, xs: number[]): number => {
+    const sorted = [...xs].sort((a, b) => a - b);
+    const med = sorted[Math.floor(sorted.length / 2)] ?? Number.NaN;
+    console.log(
+      `  ${label.padEnd(15)} median ${ms(med).padStart(8)}   min ${ms(sorted[0] ?? Number.NaN).padStart(8)}   max ${ms(sorted[sorted.length - 1] ?? Number.NaN).padStart(8)}`,
+    );
+    return med;
+  };
+  const coldMedian = stats('cold start', cold);
+  const warmMedian = stats('warm turn', warmTurns);
+  const wakeMedian = stats('pre-warmed wake', wake);
+
+  check('3 warm turn budget', warmMedian < WARM_BUDGET_MS, `median ${ms(warmMedian)} (threshold ${WARM_BUDGET_MS} ms)`);
+  check('4 wake budget', wakeMedian < WAKE_BUDGET_MS, `median ${ms(wakeMedian)} (threshold ${WAKE_BUDGET_MS} ms)`);
   check(
     '5 pre-warming helps',
-    (wake?.totalMs ?? Infinity) < cold.totalMs,
-    `pre-warmed ${ms(wake?.totalMs ?? Number.NaN)} vs cold ${ms(cold.totalMs)}`,
+    wakeMedian < coldMedian,
+    `wake median ${ms(wakeMedian)} vs cold median ${ms(coldMedian)}`,
   );
 
   // -------------------------------------------------------------------------
   section('cost');
-  const turns = 2 + WARM_SAMPLES;
-  console.log(`  turns run       ${turns} (independent of SESSIONS — phase 1 sent no prompts)`);
+  const turns = ROUNDS * 3;
+  console.log(`  turns run       ${turns} = ${ROUNDS} round(s) × 3 conditions; independent of SESSIONS`);
   console.log(`  total spend     $${spent.toFixed(4)}`);
   console.log(`  per turn        $${(spent / turns).toFixed(5)}`);
   check('6 cost measured', Number.isFinite(spent), `$${spent.toFixed(4)} across ${turns} turns`);
