@@ -14,10 +14,16 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { arch, type as osType, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type Options, query } from '@anthropic-ai/claude-agent-sdk';
+import {
+  budgetCeilingUsd,
+  costWarning,
+  formatUsage,
+  MODEL,
+  structuredTurnBudget,
+} from '../model.ts';
 import { Bus, type StoredMessage } from './bus.ts';
 
 const FREE_ONLY = process.env['FREE_ONLY'] === '1';
-const BUDGET_USD = Number(process.env['BUDGET_USD'] ?? 0.5);
 
 const results: Array<{ id: string; ok: boolean; detail: string }> = [];
 const check = (id: string, ok: boolean, detail: string): void => {
@@ -328,19 +334,14 @@ const REPORT_SCHEMA = {
 async function askStructured(
   systemPrompt: string,
   prompt: string,
-): Promise<{ value: unknown; ms: number }> {
+): Promise<{ value: unknown; ms: number; usage: unknown }> {
   const options = {
-    model: 'haiku',
+    model: MODEL,
     systemPrompt,
     tools: [],
     settingSources: [],
-    // At least 2. Structured output is delivered through an internal
-    // StructuredOutput end-turn tool call, and that call COUNTS AS A TURN. With
-    // maxTurns: 1 the model answers in text and is then cut off before it can
-    // return the schema, producing error_max_turns and no structured output at
-    // all. Any turn budget in the kernel has to account for the carrier.
-    maxTurns: 3,
-    maxBudgetUsd: BUDGET_USD,
+    maxTurns: structuredTurnBudget(),
+    maxBudgetUsd: budgetCeilingUsd(),
     persistSession: false,
     outputFormat: { type: 'json_schema', schema: REPORT_SCHEMA },
   } as unknown as Options;
@@ -348,13 +349,15 @@ async function askStructured(
   const started = performance.now();
   const q = query({ prompt, options }) as unknown as AsyncGenerator<Record<string, unknown>>;
   let value: unknown = null;
+  let usage: unknown;
   for await (const m of q) {
     if (m['type'] === 'result') {
       value = m['structured_output'] ?? null;
+      usage = m['modelUsage'];
       break;
     }
   }
-  return { value, ms: performance.now() - started };
+  return { value, ms: performance.now() - started, usage };
 }
 
 async function realAgents(): Promise<void> {
@@ -371,6 +374,7 @@ async function realAgents(): Promise<void> {
     'State one true mathematical fact about the number 7, and how confident you are.',
   );
   console.log(`  producer turn                        ${producer.ms.toFixed(0)} ms`);
+  for (const line of formatUsage(producer.usage)) console.log(line);
   console.log(`  structured payload                   ${JSON.stringify(producer.value)}`);
 
   const isStructured =
@@ -419,7 +423,9 @@ async function main(): Promise<void> {
   console.log(`  os              ${osType()} ${arch()}`);
   console.log(`  node            ${process.version}`);
   console.log(`  workdir         ${workdir}`);
+  console.log(`  model           ${MODEL}`);
   console.log(`  mode            ${FREE_ONLY ? 'FREE_ONLY — part A only, no AI usage' : 'full'}`);
+  if (!FREE_ONLY) console.log(costWarning(1));
 
   await durability();
   leasesAndIdempotency();

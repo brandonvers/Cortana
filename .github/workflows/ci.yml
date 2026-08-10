@@ -48,6 +48,9 @@ jobs:
       - name: Test
         run: pnpm run test
 
+      - name: Spike check
+        run: pnpm run check:spikes
+
       - name: Licence check
         run: pnpm run check:licenses
 
