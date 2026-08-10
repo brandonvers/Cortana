@@ -10,7 +10,7 @@ being a convention the moment a second person shows up.
 
 **Trunk-based, with short-lived branches.**
 
-```
+```text
 main ──●──────●──────●──────●──────●──▶   always green, always releasable
         \    /        \    /
          ●──●          ●──●               feat/…  fix/…  short-lived
@@ -44,7 +44,7 @@ Conventional Commit, because that message is what drives versioning (§2).
 
 ### Before 1.0.0
 
-```
+```text
 0.MINOR.PATCH
 ```
 
@@ -54,7 +54,7 @@ nobody has to guess.
 
 ### Pre-release stages
 
-```
+```text
 0.1.0-alpha.1  →  0.1.0-beta.1  →  0.1.0-rc.1  →  0.1.0
 ```
 
@@ -132,12 +132,28 @@ which reads Conventional Commits on `main`.
 Stage transitions are not something commit types can express, so they are stated
 explicitly. Put a footer in any commit that should land in the release:
 
-```
+```text
 Release-As: 0.1.0-beta.1
 ```
 
 This is how `alpha` → `beta` → `rc` → stable progression happens: deliberately,
 by a person deciding the build has earned it.
+
+### Two configuration details worth knowing
+
+**The manifest starts at `0.0.1`, not `0.0.0`.** This looks arbitrary and is not.
+release-please has a [known defect](https://github.com/googleapis/release-please/issues/2087)
+where a starting version of `0.0.0` causes the pre-major options to be ignored
+entirely, and it proposes `1.0.0` as the first release regardless of
+`bump-minor-pre-major`. It did exactly that here on the first run. Seeding the
+manifest with `0.0.1` is the documented workaround. No `v0.0.1` tag exists and
+none should — the value is a starting point for the arithmetic, not a claim that
+something was released.
+
+**`prerelease` is `true` in the configuration.** Every release until `1.0.0` is
+marked as a pre-release on GitHub, so nobody installs a `0.x` build believing the
+interface is stable. This is set to `false` in the same change that ships
+`1.0.0`.
 
 ### Which commit types affect the version
 
@@ -169,6 +185,7 @@ These are configured in GitHub rather than in the repository, so they are record
 here to survive the memory of whoever set them up.
 
 **Branch protection on `main`:**
+
 - Require a pull request before merging
 - Require status checks to pass: `verify (ubuntu-latest)`, `verify (macos-latest)`,
   `privacy guard`, `DCO sign-off`
