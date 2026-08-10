@@ -123,13 +123,25 @@ num_turns: 2
 structured_output: undefined
 ```
 
-**Structured output is delivered through an internal `StructuredOutput` end-turn
-tool call, and that call counts as a turn.** With `maxTurns: 1` the model answers
-in text and is then cut off before it can return the schema — producing
-`error_max_turns` and no structured output at all.
+Structured output is delivered through an internal `StructuredOutput` end-turn
+tool call. The first conclusion drawn from this was that the call always costs an
+extra turn — **and that was an overgeneralisation from a single model**, caught by
+the owner asking whether it was specific to `haiku`. It was.
 
-Every turn budget in the kernel must account for the carrier turn. A budget that
-looks generous at `maxTurns: 1` is in fact zero.
+| Model | `maxTurns: 1` | Assistant blocks |
+|---|---|---|
+| `haiku` | **fails** — `error_max_turns` | `thinking \| text`, then a second turn for `thinking \| tool_use:StructuredOutput` |
+| `sonnet` | **succeeds** | `text \| tool_use:StructuredOutput` in one turn |
+
+A weaker model answers in prose, ends its turn, and only then converts to the
+schema. A stronger one does both at once. The clarification-request theory was
+also tested and rejected: with an explicit "never ask for clarification" system
+prompt, `haiku` still needed the second turn.
+
+**The consequence is an interaction, not a setting.** The budget governor may
+downgrade a model tier under pressure, so a turn budget tuned against `sonnet`
+breaks silently when the same agent runs on `haiku` — and the symptom,
+`error_max_turns`, names nothing about the cause.
 
 A related trap, cheap to avoid: a vague prompt makes the model ask for
 clarification, which burns the budget and produces the same symptom for an
@@ -165,6 +177,12 @@ turn-budget requirement lives there.
   this project relies on rather than tests.
 - **One writer.** The design mandates a single serialised writer, so contention
   was not exercised. It should be, once the kernel's writer queue exists.
+- **`opus` was not probed**, deliberately. The model-comparison probes cost
+  $0.12–$0.17 per turn on `haiku` and **$0.63 on `sonnet`**, against $0.0086 per
+  `haiku` turn in [spike 0003](0003-concurrent-sessions.md). A 70× spread on the
+  same model between two runs means the cost figures here describe these runs and
+  nothing more. **The budget governor needs its own measurement**, against
+  realistic prompts, before any of these numbers are treated as parameters.
 
 ## Reproducing it
 
