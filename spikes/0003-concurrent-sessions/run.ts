@@ -28,7 +28,15 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { arch, cpus, freemem, release, totalmem, type } from 'node:os';
-import { type Options, query, type SDKUserMessage, startup } from '@anthropic-ai/claude-agent-sdk';
+import {
+  createSdkMcpServer,
+  type Options,
+  query,
+  type SDKUserMessage,
+  startup,
+  tool,
+} from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
 import {
   budgetCeilingUsd,
   costWarning,
@@ -36,6 +44,10 @@ import {
   MODEL,
   structuredTurnBudget,
 } from '../model.ts';
+import { PROFILE, profileOptions, type SdkBits, turnPrompt } from '../profile.ts';
+
+/** The SDK pieces profile.ts needs; it stays import-free so it can be shared. */
+const SDK = { createSdkMcpServer, tool, z } as unknown as SdkBits;
 
 const SESSIONS = Number(process.env['SESSIONS'] ?? 5);
 
@@ -53,23 +65,20 @@ const WARM_BUDGET_MS = Number(process.env['WARM_BUDGET_MS'] ?? 3000);
 const WAKE_BUDGET_MS = Number(process.env['WAKE_BUDGET_MS'] ?? 3000);
 
 /**
- * A short custom system prompt rather than the full agent preset. Tool
- * definitions dominate a default prompt, and this spike measures process and
- * session behaviour. It is also realistic: every Cortana agent carries its own
- * prompt, so this is the shape a resident agent actually runs with.
+ * What a session actually carries. Under the `realistic` profile this is a
+ * resident agent's own persona, a memory tool surface, read-only file access and
+ * session persistence — because measuring an empty session produces a floor, and
+ * ADR-0005 and ADR-0006 both rest on these numbers being forecasts.
  */
-const SYSTEM_PROMPT = 'You are a probe. Reply with exactly: ok';
-const PROBE = 'ok?';
+const PROBE = turnPrompt();
 
-const baseOptions = (): Options => ({
-  model: MODEL,
-  systemPrompt: SYSTEM_PROMPT,
-  tools: [],
-  settingSources: [],
-  maxTurns: structuredTurnBudget(),
-  maxBudgetUsd: budgetCeilingUsd(),
-  persistSession: false,
-});
+const baseOptions = (): Options =>
+  ({
+    model: MODEL,
+    maxTurns: structuredTurnBudget(),
+    maxBudgetUsd: budgetCeilingUsd(),
+    ...profileOptions(SDK),
+  }) as Options;
 
 // ---------------------------------------------------------------------------
 // Reporting
@@ -273,6 +282,7 @@ async function main(): Promise<void> {
   console.log(`  node            ${process.version}`);
   console.log(`  agent sdk       ${pkgVersion('@anthropic-ai/claude-agent-sdk')}`);
   console.log(`  model           ${MODEL}`);
+  console.log(`  profile         ${PROFILE}`);
   console.log(`  sessions        ${SESSIONS}`);
   console.log(costWarning(ROUNDS * 3));
 
