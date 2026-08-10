@@ -28,10 +28,29 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { arch, cpus, freemem, release, totalmem, type } from 'node:os';
-import { type Options, query, type SDKUserMessage, startup } from '@anthropic-ai/claude-agent-sdk';
+import {
+  createSdkMcpServer,
+  type Options,
+  query,
+  type SDKUserMessage,
+  startup,
+  tool,
+} from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
+import {
+  budgetCeilingUsd,
+  costWarning,
+  formatUsage,
+  MODEL,
+  structuredTurnBudget,
+} from '../model.ts';
+import { PROFILE, profileOptions, type SdkBits, turnPrompt } from '../profile.ts';
+
+/** The SDK pieces profile.ts needs; it stays import-free so it can be shared. */
+const SDK = { createSdkMcpServer, tool, z } as unknown as SdkBits;
 
 const SESSIONS = Number(process.env['SESSIONS'] ?? 5);
-const BUDGET_USD = Number(process.env['BUDGET_USD'] ?? 0.5);
+
 const VERBOSE = process.env['VERBOSE'] === '1';
 
 /**
@@ -46,23 +65,20 @@ const WARM_BUDGET_MS = Number(process.env['WARM_BUDGET_MS'] ?? 3000);
 const WAKE_BUDGET_MS = Number(process.env['WAKE_BUDGET_MS'] ?? 3000);
 
 /**
- * A short custom system prompt rather than the full agent preset. Tool
- * definitions dominate a default prompt, and this spike measures process and
- * session behaviour. It is also realistic: every Cortana agent carries its own
- * prompt, so this is the shape a resident agent actually runs with.
+ * What a session actually carries. Under the `realistic` profile this is a
+ * resident agent's own persona, a memory tool surface, read-only file access and
+ * session persistence — because measuring an empty session produces a floor, and
+ * ADR-0005 and ADR-0006 both rest on these numbers being forecasts.
  */
-const SYSTEM_PROMPT = 'You are a probe. Reply with exactly: ok';
-const PROBE = 'ok?';
+const PROBE = turnPrompt();
 
-const baseOptions = (): Options => ({
-  model: 'haiku',
-  systemPrompt: SYSTEM_PROMPT,
-  tools: [],
-  settingSources: [],
-  maxTurns: 1,
-  maxBudgetUsd: BUDGET_USD,
-  persistSession: false,
-});
+const baseOptions = (): Options =>
+  ({
+    model: MODEL,
+    maxTurns: structuredTurnBudget(),
+    maxBudgetUsd: budgetCeilingUsd(),
+    ...profileOptions(SDK),
+  }) as Options;
 
 // ---------------------------------------------------------------------------
 // Reporting
@@ -112,7 +128,13 @@ function claudeRss(): Rss {
 // A session that survives more than one turn
 // ---------------------------------------------------------------------------
 
-type Turn = { firstTokenMs: number; totalMs: number; costUsd: number; models: string };
+type Turn = {
+  firstTokenMs: number;
+  totalMs: number;
+  costUsd: number;
+  models: string;
+  usage: unknown;
+};
 
 class PromptStream {
   #queue: SDKUserMessage[] = [];
@@ -176,6 +198,7 @@ class Session {
             totalMs: performance.now() - this.#started,
             costUsd: Math.max(0, cumulative - this.#lastCumulative),
             models: usage ? Object.keys(usage).join(', ') : 'unknown',
+            usage,
           };
           this.#lastCumulative = cumulative;
           this.#firstToken = Number.NaN;
@@ -219,10 +242,17 @@ async function readWarmTurn(q: AsyncGenerator<unknown>, started: number): Promis
         totalMs: performance.now() - started,
         costUsd: Number(raw['total_cost_usd'] ?? 0),
         models: usage ? Object.keys(usage).join(', ') : 'unknown',
+        usage,
       };
     }
   }
-  return { firstTokenMs, totalMs: performance.now() - started, costUsd: 0, models: 'unknown' };
+  return {
+    firstTokenMs,
+    totalMs: performance.now() - started,
+    costUsd: 0,
+    models: 'unknown',
+    usage: undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +281,10 @@ async function main(): Promise<void> {
   );
   console.log(`  node            ${process.version}`);
   console.log(`  agent sdk       ${pkgVersion('@anthropic-ai/claude-agent-sdk')}`);
+  console.log(`  model           ${MODEL}`);
+  console.log(`  profile         ${PROFILE}`);
   console.log(`  sessions        ${SESSIONS}`);
+  console.log(costWarning(ROUNDS * 3));
 
   const baseline = claudeRss();
   console.log(
@@ -331,6 +364,7 @@ async function main(): Promise<void> {
   const warmTurns: number[] = [];
   const wake: number[] = [];
   let modelSeen = 'unknown';
+  let lastUsage: unknown;
 
   section(
     `latency: ${ROUNDS} interleaved round${ROUNDS === 1 ? '' : 's'} of cold / warm / pre-warmed`,
@@ -347,6 +381,7 @@ async function main(): Promise<void> {
     const w = await session.ask(PROBE);
     spent += w.costUsd;
     warmTurns.push(w.totalMs);
+    lastUsage = w.usage ?? lastUsage;
     await session.close();
 
     const t0 = performance.now();
@@ -398,6 +433,9 @@ async function main(): Promise<void> {
   );
   console.log(`  total spend     $${spent.toFixed(4)}`);
   console.log(`  per turn        $${(spent / turns).toFixed(5)}`);
+  // Where the cost came from. Per-turn cost varied 70x across earlier runs on the
+  // same model, so a total without a token breakdown explains nothing.
+  for (const line of formatUsage(lastUsage)) console.log(line);
   check('6 cost measured', Number.isFinite(spent), `$${spent.toFixed(4)} across ${turns} turns`);
 
   // -------------------------------------------------------------------------

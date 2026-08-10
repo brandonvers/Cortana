@@ -23,7 +23,8 @@
     "test:watch": "vitest",
     "check:licenses": "node scripts/check-licenses.mjs",
     "check:private": "node scripts/check-private.mjs",
-    "verify": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run check:licenses && pnpm run check:private"
+    "verify": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run check:spikes && pnpm run check:licenses && pnpm run check:private",
+    "check:spikes": "node scripts/check-spikes.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
