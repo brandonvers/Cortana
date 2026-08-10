@@ -55,8 +55,9 @@ function killWriterAfter(
     let killed = false;
     child.stdout.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
-      let nl: number;
-      while ((nl = buffer.indexOf('\n')) !== -1) {
+      for (;;) {
+        const nl = buffer.indexOf('\n');
+        if (nl === -1) break;
         const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
         if (line.startsWith('ACK ')) acked.push(line.slice(4));
