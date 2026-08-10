@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# PRIVATE — never published.
+# Personal notes, owner-specific documents, private packs, real credentials.
+# A pre-commit hook and a CI job both refuse anything under this path.
+# ---------------------------------------------------------------------------
+/private/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+config.local.toml
+secrets/
+
+# Runtime state
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+/data/
+/logs/
+/workspace/
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/worktrees/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Test and coverage
+coverage/
+.vitest/
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Spike scratch — throwaway by definition
+/spikes/**/node_modules/
+/spikes/**/*.db

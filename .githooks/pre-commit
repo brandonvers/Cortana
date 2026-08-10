@@ -1,0 +1,13 @@
+#!/bin/sh
+# Refuse to commit anything under private/. This is the second layer of
+# defence; .gitignore is the first. It exists so that `git add -f` and a
+# mistaken `git add -A` after an edited .gitignore still cannot leak
+# owner-personal material into a public repository.
+leaked=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^private/' || true)
+if [ -n "$leaked" ]; then
+  echo "ERROR: refusing to commit files under private/ — these are never published:" >&2
+  echo "$leaked" | sed 's/^/  /' >&2
+  echo "" >&2
+  echo "If this is genuinely intended, move the file out of private/ first." >&2
+  exit 1
+fi
