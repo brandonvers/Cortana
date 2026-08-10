@@ -34,6 +34,12 @@ const SESSIONS = Number(process.env['SESSIONS'] ?? 5);
 const BUDGET_USD = Number(process.env['BUDGET_USD'] ?? 0.5);
 const VERBOSE = process.env['VERBOSE'] === '1';
 
+/** Warm-turn samples. One sample of a noisy quantity is an anecdote. */
+const WARM_SAMPLES = Number(process.env['WARM_SAMPLES'] ?? 5);
+
+/** Absolute budget for a warm turn, in milliseconds. */
+const WARM_BUDGET_MS = Number(process.env['WARM_BUDGET_MS'] ?? 3000);
+
 /**
  * Rounds of the latency experiment. Each round samples all three conditions, so
  * this is also the sample count per condition. One sample of a noisy quantity is
