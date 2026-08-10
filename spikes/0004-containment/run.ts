@@ -17,7 +17,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Options, query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { type Options, query } from '@anthropic-ai/claude-agent-sdk';
 
 const FREE_ONLY = process.env['FREE_ONLY'] === '1';
 const BUDGET_USD = Number(process.env['BUDGET_USD'] ?? 0.5);
