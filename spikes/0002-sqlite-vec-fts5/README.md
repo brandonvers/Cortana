@@ -36,19 +36,19 @@ scale.
 
 ```bash
 cd spikes/0002-sqlite-vec-fts5
-pnpm install --ignore-workspace
+pnpm install
 pnpm start
 ```
 
-`--ignore-workspace` because this directory is deliberately outside the pnpm
-workspace, so a spike can pin whatever versions it needs without touching the
-real dependency tree.
+This directory carries its own `pnpm-workspace.yaml`, which makes it a workspace
+root in its own right. That is deliberate: a spike pins whatever versions it needs
+without touching the repository's dependency tree, and no `--ignore-workspace`
+flag is required.
 
-`better-sqlite3` is listed under `pnpm.onlyBuiltDependencies` so its native build
-script is allowed to run. pnpm blocks build scripts by default, which is the right
-default — but on a platform with no prebuilt binary this package has to compile,
-and a silently skipped build produces a confusing failure at load time rather than
-at install time.
+That file is also where `allowBuilds` permits `better-sqlite3` to run its native
+build script. pnpm blocks build scripts by default, which is the right default —
+but this package must compile or fetch a prebuilt binary during install, and a
+skipped build fails confusingly at load time rather than clearly at install time.
 
 If the compile fails, the build toolchain is missing:
 

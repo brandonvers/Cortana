@@ -1,6 +1,16 @@
 packages:
   - 'packages/*'
 
-# Spikes are throwaway by design (see CONTRIBUTING.md). They are never part of
-# the workspace, never built, and never shipped.
-ignoredBuiltDependencies: []
+# Spikes are throwaway by design (see CONTRIBUTING.md). Each carries its own
+# pnpm-workspace.yaml so it resolves independently and can pin its own versions.
+# They are never part of this workspace, never built, and never shipped.
+
+# Native modules must be listed here before pnpm will run their build scripts.
+# pnpm blocks them by default, which is correct — a build script is arbitrary
+# code from a dependency — so each one is an explicit decision.
+#
+# As of pnpm 11 this file is also the only place settings are read from: the
+# `pnpm` field in package.json is ignored entirely, and `onlyBuiltDependencies`,
+# `neverBuiltDependencies`, and `ignoredBuiltDependencies` were merged into this
+# single `allowBuilds` map.
+allowBuilds: {}
