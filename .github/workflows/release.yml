@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Only ever one release run at a time, and never cancelled part-way — a
+# half-applied release is worse than a delayed one.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # Opens or updates a release pull request carrying the version bump and
+      # the generated changelog entry. Merging that pull request is what creates
+      # the tag and the GitHub Release — see docs/RELEASING.md. The review step
+      # is deliberate: a mistyped commit type produces a wrong version bump, and
+      # this is where it gets caught.
+      - uses: googleapis/release-please-action@v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

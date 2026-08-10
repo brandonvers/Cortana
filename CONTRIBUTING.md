@@ -125,7 +125,7 @@ That adds `Signed-off-by: Your Name <your@email>` to the message. CI checks for 
 
 ### Conventional Commits
 
-```
+```text
 <type>(<scope>): <subject>
 
 <body — explain WHY, not what; the diff already says what>
@@ -133,13 +133,29 @@ That adds `Signed-off-by: Your Name <your@email>` to the message. CI checks for 
 Signed-off-by: Your Name <your@email>
 ```
 
-Types: `feat`, `fix`, `docs`, `refactor`, `test`, `build`, `ci`, `chore`, `perf`.
+Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`,
+`revert`. A breaking change takes a `!` before the colon, or a `BREAKING CHANGE:`
+footer.
+
+**These types are not decoration — they drive the version number.** `feat` bumps
+the minor, `fix` bumps the patch, and a breaking marker does something larger.
+See [docs/RELEASING.md](docs/RELEASING.md).
 
 Keep commits small and atomic. One idea per commit.
 
 ### Pull requests
 
-- Branch from `main`
+Everything lands through a pull request, including the maintainer's own work.
+That is not ceremony: the DCO check only runs on pull requests, so anything
+pushed straight to `main` never has its sign-off verified.
+
+Merges are **squash merges**, and the pull request title becomes the commit
+message on `main`. That message drives the version bump and the changelog entry,
+so **the title must itself be a valid Conventional Commit**. CI checks it.
+
+- Branch from `main`, named for the change: `feat/agent-roster`,
+  `fix/queue-lease-expiry`
+- Keep it short-lived. A long branch is a merge conflict accruing interest
 - `pnpm run verify` must pass before you open it
 - Every non-trivial module needs tests. Especially the durable job queue, envelope handling,
   the policy engine, and memory retrieval — that is where silent bugs cost the most.
@@ -155,6 +171,16 @@ required to understand or extend the project lives in the public `docs/`.
 
 If you are working from a fork and want your own private material alongside the code, that
 directory is there for you too and will never be committed.
+
+## Releases
+
+You do not need to touch versions, tags, or the changelog — all three are
+generated from commit messages, which is why the commit type matters.
+
+If you want to know what a version number means before you install one, or what
+`1.0.0` will commit to, that is all in [docs/RELEASING.md](docs/RELEASING.md).
+The short version: while the major version is `0`, the interface is not stable,
+and `alpha` means "may lose your data".
 
 ## Code of Conduct
 
