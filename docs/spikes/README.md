@@ -10,6 +10,7 @@ designed around. A spike is a throwaway script with a pass criterion written dow
 | [0002](0002-sqlite-vec-fts5-multilingual.md) | Do the vector extension and full-text search work on both targets, does full-text search actually fail on inflected languages, and how far does brute-force vector search scale? | ✅ Pass on both platforms; the failure is real; ceiling measured at ~65k vectors |
 | [0003](0003-concurrent-sessions.md) | Can the hardware sustain a dozen concurrent long-lived agent sessions, and is waking a dormant one fast enough? | ✅ Pass — 264 MB per session, flat across scale; dormancy costs 656 ms per wake |
 | [0004](0004-containment.md) | Does the quarantine profile hold against injection, and does the OS sandbox actually contain? | ✅ Pass — zero escapes, and bubblewrap contains on the target |
+| [0005](0005-durable-bus.md) | Does an acknowledged write survive SIGKILL, and do the delivery rules work against a real store? | ✅ Pass on both filesystems — nothing acknowledged was ever lost |
 
 ## Rules
 
@@ -36,7 +37,6 @@ The spikes that must complete before implementation begins, in order:
 
 | Question | Why it is blocking |
 |---|---|
-| Structured agent-to-agent messaging round trip, surviving a restart | This is what "they talk to each other" has to mean in practice |
 | Measured retrieval quality: lexical vs vector vs fusion, on a real non-English test set | The fusion weights must come from measurement, not from a plausible-looking default |
 | Is structured model output enforced or best-effort? | Decides how much re-validation the kernel needs at the model boundary |
 | Claude Code's *use* of the sandbox, as opposed to bubblewrap itself | [0004](0004-containment.md) proved the primitive contains; the policy translation above it is untested |

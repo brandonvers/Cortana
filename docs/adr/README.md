@@ -22,6 +22,7 @@ how settled questions stay settled.
 | [0012](0012-local-embeddings.md) | Embeddings run locally, behind an interface | Accepted |
 | [0013](0013-module-isolation.md) | Modules run in-process by default, with opt-in process isolation | Accepted |
 | [0014](0014-kernel-mediated-reports.md) | The kernel receives and aggregates agent reports | Accepted |
+| [0015](0015-structured-output-at-the-model-boundary.md) | Every crossing from a model back into the kernel carries a schema | Accepted |
 
 ## When to write one
 
