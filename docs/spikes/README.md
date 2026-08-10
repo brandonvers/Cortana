@@ -7,7 +7,7 @@ designed around. A spike is a throwaway script with a pass criterion written dow
 | # | Question | Verdict |
 |---|---|---|
 | [0001](0001-drizzle-kit-typescript-7.md) | Does the migration tool work under TypeScript 7, which shipped without a compiler API? | ✅ Pass |
-| [0002](0002-sqlite-vec-fts5-multilingual.md) | Do the vector extension and full-text search work, and does full-text search actually fail on inflected languages? | ✅ Pass, and the failure is real |
+| [0002](0002-sqlite-vec-fts5-multilingual.md) | Do the vector extension and full-text search work on both targets, does full-text search actually fail on inflected languages, and how far does brute-force vector search scale? | ✅ Pass on both platforms; the failure is real; ceiling measured at ~65k vectors |
 
 ## Rules
 
@@ -38,7 +38,6 @@ The spikes that must complete before implementation begins, in order:
 | Wake latency from dormant to active, with and without pre-warming | [ADR-0006](../adr/0006-dormancy-is-the-default.md) depends on this being a few seconds, not tens |
 | Structured agent-to-agent messaging round trip, surviving a restart | This is what "they talk to each other" has to mean in practice |
 | Does the quarantine profile actually hold against an escape attempt? | [ADR-0007](../adr/0007-quarantine-untrusted-content.md) is a security claim, and an unverified security claim is a guess |
-| The vector extension on the primary Linux target | [0002](0002-sqlite-vec-fts5-multilingual.md) passed on macOS only; the extension is a compiled artefact and says nothing about the other platform |
 | Measured retrieval quality: lexical vs vector vs fusion, on a real non-English test set | The fusion weights must come from measurement, not from a plausible-looking default |
 | Is structured model output enforced or best-effort? | Decides how much re-validation the kernel needs at the model boundary |
 | Sandboxed shell on the primary Linux target | The real isolation boundary, and the one a security claim rests on |
