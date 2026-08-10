@@ -1,0 +1,20 @@
+{
+  "name": "spike-0002-sqlite-vec-fts5",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway: verifies sqlite-vec, FTS5 behaviour on inflected languages, and brute-force KNN scaling",
+  "scripts": {
+    "start": "node run.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.3",
+    "drizzle-orm": "0.45.2",
+    "sqlite-vec": "0.1.9"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
+}
