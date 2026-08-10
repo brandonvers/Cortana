@@ -1,0 +1,76 @@
+name: Dependency proposal
+description: Propose adding a new dependency (required before opening such a PR)
+labels: [dependency]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Every dependency is discussed before it is added. See CONTRIBUTING.md §
+        Dependencies. The best dependency is often none — but do not hand-roll
+        what a well-maintained standard solves.
+
+  - type: input
+    id: package
+    attributes:
+      label: Package
+      placeholder: name@version
+    validations:
+      required: true
+
+  - type: textarea
+    id: need
+    attributes:
+      label: What it is for
+      description: The actual need, in one sentence.
+    validations:
+      required: true
+
+  - type: input
+    id: license
+    attributes:
+      label: Licence
+      description: >-
+        Must be compatible with MIT. AGPL, SSPL, and source-available licences
+        are disqualifying. Check, do not assume.
+    validations:
+      required: true
+
+  - type: textarea
+    id: health
+    attributes:
+      label: Maintenance health
+      description: Last release date, open issue trend, how many people can merge.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: >-
+        Other libraries, and writing it ourselves — how much code would that be,
+        and how much ongoing maintenance?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: native
+    attributes:
+      label: Does it require native compilation?
+      description: >-
+        Anything requiring compilation must build on Linux x86_64 and macOS
+        arm64.
+      options:
+        - 'No'
+        - 'Yes — and it builds on both targets'
+        - 'Yes — untested on one or both targets'
+    validations:
+      required: true
+
+  - type: textarea
+    id: reversibility
+    attributes:
+      label: If this turns out to be the wrong choice
+      description: How hard is it to reverse, and which module absorbs the change?
+    validations:
+      required: true

@@ -1,0 +1,12 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/brandonvers/cortana/security/advisories/new
+    about: >-
+      Do not open a public issue for a vulnerability. Report it privately here.
+      See SECURITY.md.
+  - name: Question or design discussion
+    url: https://github.com/brandonvers/cortana/discussions
+    about: >-
+      For questions, or to argue with a design decision. Disagreement with
+      reasoning behind it is welcome.
