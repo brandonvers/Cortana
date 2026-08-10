@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+
+    // Node runs our .ts files directly via type stripping, which can only remove
+    // syntax that erases to nothing. This flag makes the compiler reject anything
+    // that would not survive it — enums, namespaces, parameter properties — so a
+    // file that typechecks is guaranteed to run. See docs/adr/0007.
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+
+    // Node's type stripping does no specifier rewriting, so a relative import
+    // must name the file that actually exists on disk: `./thing.ts`. TypeScript
+    // normally rejects that. These two flags together are the supported way to
+    // have both — source imports `.ts` so `node file.ts` works in development,
+    // and `tsc` rewrites the specifier to `.js` when it emits for production.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@cortana/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared identity, lifecycle, and envelope types. Depends on no other internal package.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ]
+}

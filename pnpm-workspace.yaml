@@ -1,0 +1,6 @@
+packages:
+  - 'packages/*'
+
+# Spikes are throwaway by design (see CONTRIBUTING.md). They are never part of
+# the workspace, never built, and never shipped.
+ignoredBuiltDependencies: []
