@@ -5,12 +5,12 @@
  * were written down before this was run.
  */
 
-import { cpus, totalmem, type, release, arch } from 'node:os';
 import { readFileSync } from 'node:fs';
+import { arch, cpus, release, totalmem, type } from 'node:os';
 import Database from 'better-sqlite3';
-import * as sqliteVec from 'sqlite-vec';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import * as sqliteVec from 'sqlite-vec';
 
 // ---------------------------------------------------------------------------
 // Reporting helpers. A spike that a human has to interpret gets interpreted
@@ -76,9 +76,10 @@ let sqliteVersion = '';
 let vecVersion = '';
 try {
   sqliteVec.load(db);
-  const row = db
-    .prepare('select sqlite_version() as s, vec_version() as v')
-    .get() as { s: string; v: string };
+  const row = db.prepare('select sqlite_version() as s, vec_version() as v').get() as {
+    s: string;
+    v: string;
+  };
   sqliteVersion = row.s;
   vecVersion = row.v;
   check('1 extension loads', true, `sqlite ${sqliteVersion}, sqlite-vec ${vecVersion}`);
@@ -133,7 +134,11 @@ db.prepare('insert into f(body) values (?)').run(TEXT);
 const ftsHits = (q: string): number =>
   (db.prepare('select body from f where f match ?').all(q) as unknown[]).length;
 
-check('3 diacritic folding', ftsHits('hazban') === 1, `"hazban" (no accents) → ${ftsHits('hazban')} hit(s)`);
+check(
+  '3 diacritic folding',
+  ftsHits('hazban') === 1,
+  `"hazban" (no accents) → ${ftsHits('hazban')} hit(s)`,
+);
 check(
   '4 no stemmer (expected)',
   ftsHits('haz') === 0,
@@ -175,8 +180,7 @@ const nextUnit = (): number => {
   seed = (seed * 1103515245 + 12345) & 0x7fffffff;
   return seed / 0x7fffffff - 0.5;
 };
-const randomVector = (): Buffer =>
-  f32(Array.from({ length: DIMS }, () => nextUnit()));
+const randomVector = (): Buffer => f32(Array.from({ length: DIMS }, () => nextUnit()));
 
 const insertBig = db.prepare('insert into big(id, e) values (?, ?)');
 const insertMany = db.transaction((n: number) => {
@@ -188,7 +192,9 @@ insertMany(ROWS);
 const writeMs = performance.now() - writeStart;
 console.log(`  inserted ${ROWS.toLocaleString()} × ${DIMS}d in ${writeMs.toFixed(0)} ms`);
 
-const query = db.prepare('select id, distance from big where e match ? and k = 10 order by distance');
+const query = db.prepare(
+  'select id, distance from big where e match ? and k = 10 order by distance',
+);
 const timings: number[] = [];
 for (let i = 0; i < 50; i++) {
   const probe = randomVector();
@@ -200,7 +206,9 @@ timings.sort((a, b) => a - b);
 const p50 = timings[Math.floor(timings.length * 0.5)] ?? 0;
 const p95 = timings[Math.floor(timings.length * 0.95)] ?? 0;
 
-console.log(`  KNN k=10 over ${ROWS.toLocaleString()} vectors: p50 ${p50.toFixed(1)} ms, p95 ${p95.toFixed(1)} ms`);
+console.log(
+  `  KNN k=10 over ${ROWS.toLocaleString()} vectors: p50 ${p50.toFixed(1)} ms, p95 ${p95.toFixed(1)} ms`,
+);
 check('8 brute-force is fast enough', p95 < 50, `p95 ${p95.toFixed(1)} ms (threshold 50 ms)`);
 
 // ---------------------------------------------------------------------------

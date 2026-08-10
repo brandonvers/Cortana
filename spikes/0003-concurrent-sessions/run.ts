@@ -26,19 +26,13 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { arch, cpus, freemem, release, totalmem, type } from 'node:os';
 import { readFileSync } from 'node:fs';
-import { query, startup, type Options, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { arch, cpus, freemem, release, totalmem, type } from 'node:os';
+import { type Options, query, type SDKUserMessage, startup } from '@anthropic-ai/claude-agent-sdk';
 
 const SESSIONS = Number(process.env['SESSIONS'] ?? 5);
 const BUDGET_USD = Number(process.env['BUDGET_USD'] ?? 0.5);
 const VERBOSE = process.env['VERBOSE'] === '1';
-
-/** Warm-turn samples. One sample of a noisy quantity is an anecdote. */
-const WARM_SAMPLES = Number(process.env['WARM_SAMPLES'] ?? 5);
-
-/** Absolute budget for a warm turn, in milliseconds. */
-const WARM_BUDGET_MS = Number(process.env['WARM_BUDGET_MS'] ?? 3000);
 
 /**
  * Rounds of the latency experiment. Each round samples all three conditions, so
@@ -260,7 +254,9 @@ async function main(): Promise<void> {
   console.log(`  sessions        ${SESSIONS}`);
 
   const baseline = claudeRss();
-  console.log(`  baseline        ${baseline.count} claude process(es), ${baseline.totalMb.toFixed(0)} MB`);
+  console.log(
+    `  baseline        ${baseline.count} claude process(es), ${baseline.totalMb.toFixed(0)} MB`,
+  );
   if (VERBOSE) for (const l of baseline.lines) console.log(`                  ${l}`);
 
   // A machine already short of memory produces timings that say more about
@@ -282,7 +278,9 @@ async function main(): Promise<void> {
   for (let i = 0; i < SESSIONS; i++) {
     const t0 = performance.now();
     warm.push(await startup({ options: baseOptions() }));
-    console.log(`  session ${String(i + 1).padStart(2)}     initialised in ${ms(performance.now() - t0)}`);
+    console.log(
+      `  session ${String(i + 1).padStart(2)}     initialised in ${ms(performance.now() - t0)}`,
+    );
   }
 
   const loaded = claudeRss();
@@ -298,7 +296,11 @@ async function main(): Promise<void> {
   console.log(`  per session     ${perSession.toFixed(0)} MB`);
   console.log(`  → 12 residents  ${((perSession * 12) / 1024).toFixed(1)} GB projected`);
 
-  check('1 sessions start', newProcesses >= SESSIONS, `${newProcesses} new for ${SESSIONS} requested`);
+  check(
+    '1 sessions start',
+    newProcesses >= SESSIONS,
+    `${newProcesses} new for ${SESSIONS} requested`,
+  );
   check(
     '2 memory per session',
     Number.isFinite(perSession) && perSession > 0 && (perSession * 12) / 1024 < totalGb / 4,
@@ -330,7 +332,9 @@ async function main(): Promise<void> {
   const wake: number[] = [];
   let modelSeen = 'unknown';
 
-  section(`latency: ${ROUNDS} interleaved round${ROUNDS === 1 ? '' : 's'} of cold / warm / pre-warmed`);
+  section(
+    `latency: ${ROUNDS} interleaved round${ROUNDS === 1 ? '' : 's'} of cold / warm / pre-warmed`,
+  );
   for (let round = 0; round < ROUNDS; round++) {
     const prewarmed = await startup({ options: baseOptions() });
 
@@ -370,8 +374,16 @@ async function main(): Promise<void> {
   const warmMedian = stats('warm turn', warmTurns);
   const wakeMedian = stats('pre-warmed wake', wake);
 
-  check('3 warm turn budget', warmMedian < WARM_BUDGET_MS, `median ${ms(warmMedian)} (threshold ${WARM_BUDGET_MS} ms)`);
-  check('4 wake budget', wakeMedian < WAKE_BUDGET_MS, `median ${ms(wakeMedian)} (threshold ${WAKE_BUDGET_MS} ms)`);
+  check(
+    '3 warm turn budget',
+    warmMedian < WARM_BUDGET_MS,
+    `median ${ms(warmMedian)} (threshold ${WARM_BUDGET_MS} ms)`,
+  );
+  check(
+    '4 wake budget',
+    wakeMedian < WAKE_BUDGET_MS,
+    `median ${ms(wakeMedian)} (threshold ${WAKE_BUDGET_MS} ms)`,
+  );
   check(
     '5 pre-warming helps',
     wakeMedian < coldMedian,
@@ -381,7 +393,9 @@ async function main(): Promise<void> {
   // -------------------------------------------------------------------------
   section('cost');
   const turns = ROUNDS * 3;
-  console.log(`  turns run       ${turns} = ${ROUNDS} round(s) × 3 conditions; independent of SESSIONS`);
+  console.log(
+    `  turns run       ${turns} = ${ROUNDS} round(s) × 3 conditions; independent of SESSIONS`,
+  );
   console.log(`  total spend     $${spent.toFixed(4)}`);
   console.log(`  per turn        $${(spent / turns).toFixed(5)}`);
   check('6 cost measured', Number.isFinite(spent), `$${spent.toFixed(4)} across ${turns} turns`);
