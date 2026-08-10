@@ -1,0 +1,43 @@
+Cortana
+Copyright (c) 2026 Brandon Scheiber
+
+This product is licensed under the MIT License. See LICENSE for the full text.
+
+---
+
+TRADEMARK AND AFFILIATION NOTICE
+
+This project is an independent, non-commercial, open-source work. It is not
+affiliated with, endorsed by, sponsored by, or connected to any of the parties
+named below. All trademarks are the property of their respective owners and are
+used here only to identify the products this software interoperates with.
+
+  "Cortana"
+      Cortana is a trademark of Microsoft Corporation. This project is not
+      associated with Microsoft Corporation or with any Microsoft product,
+      service, or character. The name is used here descriptively for a personal,
+      non-commercial open-source project and implies no relationship of any kind.
+
+  "Claude", "Claude Code", "Anthropic"
+      Claude and Anthropic are trademarks of Anthropic PBC. This project is not
+      affiliated with, endorsed by, or supported by Anthropic. It is a
+      third-party harness that a user runs on their own machine, driving the
+      user's own installation of Anthropic's software under the user's own
+      account. This project neither offers nor brokers access to Anthropic
+      services, and it never handles, stores, or transmits Anthropic
+      credentials on any user's behalf.
+
+  Other names
+      Product and service names referenced in documentation, connectors, or
+      configuration examples are trademarks of their respective owners and are
+      used solely to describe compatibility.
+
+---
+
+USER RESPONSIBILITY
+
+This software runs with the permissions you grant it, executes commands on your
+machine, and acts on your accounts through credentials you supply. You are
+responsible for how you configure and operate it, and for compliance with the
+terms of service of every third-party provider you connect to it, including the
+terms governing your own AI provider subscription.
