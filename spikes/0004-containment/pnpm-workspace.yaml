@@ -1,0 +1,4 @@
+# Own workspace root, so the spike resolves independently of the repository and
+# can pin its own versions. See spikes/README.md.
+packages:
+  - '.'

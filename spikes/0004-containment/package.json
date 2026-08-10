@@ -1,0 +1,16 @@
+{
+  "name": "spike-0004-containment",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway: tries to break the quarantine profile and the OS sandbox",
+  "scripts": {
+    "start": "node run.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.226",
+    "@anthropic-ai/sdk": "^0.93.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "4.4.3"
+  }
+}
