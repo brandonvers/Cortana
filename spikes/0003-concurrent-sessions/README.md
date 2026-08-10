@@ -26,25 +26,38 @@ that to work:
 |---|---|---|
 | 1 | All sessions start and survive the run | no session dies |
 | 2 | Resident memory per session | measured; twelve must fit in a quarter of the machine's memory |
-| 3 | Warm turn latency | **median of 5 samples under 3 s** |
-| 4 | Pre-warmed wake, prompt to complete | **< 3 s** |
-| 5 | Pre-warming is worth its complexity | pre-warmed measurably faster than cold |
+| 3 | Warm turn latency | **median under 3 s** |
+| 4 | Pre-warmed wake, prompt to complete | **median under 3 s** |
+| 5 | Pre-warming is worth its complexity | **wake median below cold median** |
 | 6 | Cost | measured and reported, so the budget governor has real numbers |
 
-### Criterion 3 was revised after the first run
+### How the latency criteria were fixed, twice
 
-It originally read *"warm turn under 40% of a cold start"*. That was a bad test,
-and it would have been a bad test whichever way it landed: it divides by a single
-cold-start sample, and cold start is the noisiest quantity here — 8,524 ms and
-5,331 ms across two runs of identical work. The bar moved with the noise, and the
-run whose warm turn was **faster in absolute terms** failed by eight milliseconds
-because its cold sample happened to be quick.
+The first version compared a single warm sample against 40% of a single cold
+sample. It failed by eight milliseconds — in the run where the warm turn was
+**faster in absolute terms**, purely because that run's cold sample happened to be
+quick.
 
-The first run's result is recorded as measured in
-[the report](../../docs/spikes/0003-concurrent-sessions.md) rather than rewritten.
-Moving a threshold after seeing the number it produced is how a test stops meaning
-anything. The replacement is an absolute budget over a median of several samples,
-which is what the ratio was standing in for.
+The fix at the time replaced criterion 3 with an absolute budget over five
+samples, and left criteria 4 and 5 sampling once. **That was the same mistake,
+left in place twice**, and the next run duly failed both: the pre-warmed wake came
+back at 1,743 ms, 1,874 ms and then 4,623 ms across three runs of identical work,
+while cold start ranged from 2,841 ms to 8,524 ms.
+
+Against that much variance a single sample per condition decides the verdict by
+coin toss, and it did — twice, in opposite directions.
+
+All three conditions are now sampled over **interleaved rounds**: each round
+measures cold, warm and pre-warmed, so a period of provider slowness lands on all
+three alike instead of biasing whichever happened to run during it. Each round's
+pre-warmed handle is created at the round's start and queried at its end, giving
+every wake sample the same realistic idle gap — a dormant agent pre-warmed some
+seconds ago, not one queried the instant its process appeared.
+
+**Every measured result stands in [the report](../../docs/spikes/0003-concurrent-sessions.md)
+as it came out.** Moving a threshold after seeing the number it produced is how a
+test stops meaning anything. Fixing an experiment that cannot tell signal from
+noise is a different thing, and the distinction is worth keeping clear.
 
 ## Cost
 
