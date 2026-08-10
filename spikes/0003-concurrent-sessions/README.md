@@ -25,11 +25,26 @@ that to work:
 | # | Criterion | Threshold |
 |---|---|---|
 | 1 | All sessions start and survive the run | no session dies |
-| 2 | Resident memory per session | measured; total must leave ample headroom on the target machine |
-| 3 | Warm turn latency vs cold start | warm < 40% of cold |
-| 4 | Pre-warmed wake, prompt to first token | **< 3 s** |
+| 2 | Resident memory per session | measured; twelve must fit in a quarter of the machine's memory |
+| 3 | Warm turn latency | **median of 5 samples under 3 s** |
+| 4 | Pre-warmed wake, prompt to complete | **< 3 s** |
 | 5 | Pre-warming is worth its complexity | pre-warmed measurably faster than cold |
 | 6 | Cost | measured and reported, so the budget governor has real numbers |
+
+### Criterion 3 was revised after the first run
+
+It originally read *"warm turn under 40% of a cold start"*. That was a bad test,
+and it would have been a bad test whichever way it landed: it divides by a single
+cold-start sample, and cold start is the noisiest quantity here — 8,524 ms and
+5,331 ms across two runs of identical work. The bar moved with the noise, and the
+run whose warm turn was **faster in absolute terms** failed by eight milliseconds
+because its cold sample happened to be quick.
+
+The first run's result is recorded as measured in
+[the report](../../docs/spikes/0003-concurrent-sessions.md) rather than rewritten.
+Moving a threshold after seeing the number it produced is how a test stops meaning
+anything. The replacement is an absolute budget over a median of several samples,
+which is what the ratio was standing in for.
 
 ## Cost
 

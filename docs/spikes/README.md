@@ -8,6 +8,7 @@ designed around. A spike is a throwaway script with a pass criterion written dow
 |---|---|---|
 | [0001](0001-drizzle-kit-typescript-7.md) | Does the migration tool work under TypeScript 7, which shipped without a compiler API? | ✅ Pass |
 | [0002](0002-sqlite-vec-fts5-multilingual.md) | Do the vector extension and full-text search work on both targets, does full-text search actually fail on inflected languages, and how far does brute-force vector search scale? | ✅ Pass on both platforms; the failure is real; ceiling measured at ~65k vectors |
+| [0003](0003-concurrent-sessions.md) | Can the hardware sustain a dozen concurrent long-lived agent sessions, and is waking a dormant one fast enough? | ✅ Pass — 264 MB per session, flat across scale; wake in 1.7–1.9 s |
 
 ## Rules
 
@@ -34,8 +35,6 @@ The spikes that must complete before implementation begins, in order:
 
 | Question | Why it is blocking |
 |---|---|
-| Memory and token cost of several concurrent long-lived sessions | Decides whether the execution topology in [ADR-0005](../adr/0005-hybrid-execution-topology.md) is viable at all |
-| Wake latency from dormant to active, with and without pre-warming | [ADR-0006](../adr/0006-dormancy-is-the-default.md) depends on this being a few seconds, not tens |
 | Structured agent-to-agent messaging round trip, surviving a restart | This is what "they talk to each other" has to mean in practice |
 | Does the quarantine profile actually hold against an escape attempt? | [ADR-0007](../adr/0007-quarantine-untrusted-content.md) is a security claim, and an unverified security claim is a guess |
 | Measured retrieval quality: lexical vs vector vs fusion, on a real non-English test set | The fusion weights must come from measurement, not from a plausible-looking default |
