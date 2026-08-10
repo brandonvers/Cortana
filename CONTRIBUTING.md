@@ -12,8 +12,8 @@ made here.
 You need **Node.js ≥ 24.12** (the version in `.nvmrc`) and **pnpm ≥ 11**.
 
 ```bash
-git clone https://github.com/brandonvers/cortana.git
-cd cortana
+git clone https://github.com/brandonvers/Cortana.git
+cd Cortana
 
 nvm use                 # or fnm use / volta — anything that reads .nvmrc
 npm install -g pnpm@11  # if you do not have pnpm 11 yet

@@ -8,7 +8,7 @@
   "author": "Brandon Scheiber",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/brandonvers/cortana.git"
+    "url": "git+https://github.com/brandonvers/Cortana.git"
   },
   "engines": {
     "node": ">=24.12.0",
