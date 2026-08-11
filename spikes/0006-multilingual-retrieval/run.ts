@@ -86,6 +86,11 @@ const CANDIDATES: Candidate[] = [
     licence: 'Apache-2.0',
     note: 'CONTROL, expected to lose: English-first, and by pull count the model most people reach for by default.',
   },
+  {
+    model: 'embeddinggemma',
+    licence: 'Gemma Terms — NOT OSI',
+    note: 'Measured on request. Scores well, but its licence carries use restrictions and downstream obligations that MIT and Apache-2.0 do not, so it cannot be the default whatever this table says.',
+  },
 ];
 
 /**
@@ -551,6 +556,19 @@ console.log(`  ${'lexical alone (no model)'.padEnd(26)}    —  ${pct(lexicalOnl
 // The winner is the best *real* model. The control is ranked alongside them on
 // purpose — if it does not come last, that is the headline, not a footnote.
 const best = modelResults.find((r) => r.model !== RANDOM_CONTROL);
+
+// Scoring first does not make a model eligible to be the default. A licence with
+// use restrictions is a property of the model, not a footnote to its benchmark,
+// and every user inherits whatever this project defaults to.
+const eligible = modelResults.find(
+  (r) => r.model !== RANDOM_CONTROL && !r.licence.includes('NOT OSI'),
+);
+if (best && eligible && best.model !== eligible.model) {
+  console.log(`\n  ⚠ ${best.model} scores highest but is not OSI-licensed (${best.licence}).`);
+  console.log(
+    `    Best model eligible to be the default: ${eligible.model} (${eligible.licence}).`,
+  );
+}
 if (control && modelResults[0]?.model === RANDOM_CONTROL) {
   console.log('\n  ⚠ THE RANDOM CONTROL WON. No model contributed anything the lexical');
   console.log('    indexes were not already providing. Read every number below as noise.');
@@ -581,16 +599,45 @@ check(
 // managed it in a dry run. The real bar is the noise floor, and it is stated as a
 // margin because on a set this size a single query is worth 2.5 points and a
 // one-query lead is not a finding.
+// Judged on MRR, not recall@5, and the reason is a design constraint rather than
+// a preference for one statistic.
+//
+// Run 2 passed this criterion on recall@5 with a dead tie — 97.7% fused against
+// 97.7% vector-alone — while the same run showed fusion costing 16 points of
+// recall@1 and 0.11 of MRR. Recall@5 cannot see that, because it asks only
+// whether the right memory is somewhere in the top five.
+//
+// Rank inside that window is not free. The retrieved-context block has a token
+// budget (spike 0003 measured ~2,500 tokens of it), so a memory ranked fifth
+// arrives alongside four irrelevant ones and competes with them for the agent's
+// attention — or gets cut. MRR is what registers that; recall@5 is what let a
+// regression through as a pass.
 const MARGIN = 0.05;
-const beatsHalves = best ? best.fused.r5 >= Math.max(lexicalOnly.r5, best.vector.r5) : false;
+const beatsHalves = best ? best.fused.mrr >= best.vector.mrr : false;
 const beatsNoise = best && control ? best.fused.r5 >= control.fused.r5 + MARGIN : false;
 check(
-  '5 fusion is at least as good as either half alone, and beats the noise floor',
+  '5 fusion earns its complexity (MRR) and beats the noise floor',
   beatsHalves && beatsNoise,
   best
-    ? `staged ${pct(best.fused.r5)} vs lexical ${pct(lexicalOnly.r5)}, vector ${pct(best.vector.r5)}, control ${control ? pct(control.fused.r5) : '—'} (needs +${pct(MARGIN)} over the control)`
+    ? `staged MRR ${best.fused.mrr.toFixed(3)} vs vector-alone ${best.vector.mrr.toFixed(3)} (${best.fused.mrr >= best.vector.mrr ? '+' : ''}${(best.fused.mrr - best.vector.mrr).toFixed(3)}); recall@5 ${pct(best.fused.r5)} vs control ${control ? pct(control.fused.r5) : '—'}`
     : 'no model produced results',
 );
+
+// Whether the lexical indexes help or hurt turns out to depend on how good the
+// vector index is, so the per-model deltas are printed rather than summarised.
+// This is the table ADR-0010 has to be re-read against.
+if (best) {
+  console.log('        fusion delta against vector-alone, per model:');
+  for (const r of modelResults) {
+    if (r.model === RANDOM_CONTROL) continue;
+    const d1 = r.fused.r1 - r.vector.r1;
+    const dm = r.fused.mrr - r.vector.mrr;
+    const sign = (x: number) => (x >= 0 ? '+' : '');
+    console.log(
+      `          ${r.model.padEnd(26)} recall@1 ${sign(d1)}${pct(d1).padStart(6)}   MRR ${sign(dm)}${dm.toFixed(3)}`,
+    );
+  }
+}
 
 // Reported whether or not criterion 5 passes, because "which fusion" is a
 // separate question from "fusion at all", and the first run conflated them.

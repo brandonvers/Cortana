@@ -1,12 +1,27 @@
 # Spike 0006 — Retrieval quality in a language the stemmer does not cover
 
-**Date:** 2026-08-11 · **run 1 of 2** — a second run is required, and why is the
-substance of this report
-**Verdict:** ⚠️ **Inconclusive on the question it was built to answer**, and
-conclusive on two it was not.
-**Decides:** the default embedding model, and whether
-[ADR-0010](../adr/0010-sqlite-storage.md)'s three-index design earns its
-complexity
+**Date:** 2026-08-11 · two runs
+**Verdict:** ✅ **`bge-m3` is the default embedding model**, on measurement.
+❌ **[ADR-0010](../adr/0010-sqlite-storage.md)'s fusion does not earn its
+complexity** — the lexical indexes make the best model measurably worse.
+**Decides:** the default embedding model, and whether the three-index design
+earns its complexity
+
+---
+
+## The short version
+
+Two runs. Run 1 produced a winner and two red criteria; investigating them found
+**three defects in the spike itself**, each of which changed the answer once
+fixed. Run 2 is the measurement.
+
+| | |
+|---|---|
+| **Default model** | **`bge-m3`** — MIT, 96.8% Hungarian recall@5, 3.2-point language gap, only model at 100% on long items |
+| **Fusion** | **Harmful for good models, helpful for bad ones.** `bge-m3` loses 16 points of recall@1 and 0.11 MRR when the lexical indexes are fused in |
+| **ADR-0012's fear** | Confirmed — the English-first model degrades 32 points, silently |
+| **ADR-0012's shortcut** | Refuted — a model card's language list does not predict performance |
+| **Still open** | Latency, because Ollama ran on the CPU throughout |
 
 ---
 
@@ -49,7 +64,7 @@ environment variables.
 system as it would run.** It failed, and it may pass on the GPU; that is not yet
 known.
 
-## Result, as it came out
+## Run 1 — as it came out
 
 ```text
 model                       dims   vec@5  FUSED@5    MRR    hu@5    en@5     gap   embed p95
@@ -64,7 +79,33 @@ random-vectors (control)     768    5.0%    70.0%  0.565   67.9%   75.0%    7.1%
 lexical alone (no model)            —       67.5%  0.603
 ```
 
-**Criteria 5 and 8 failed. 0, 1, 2, 3, 4, 6 and 7 passed.**
+**Criteria 5 and 8 failed.** Chasing both found three defects in the spike, set
+out below. Run 1's winner did not survive them.
+
+## Run 2 — after the fixes
+
+```text
+model                       dims  vec@5  flat@5  STAGED@5   MRR    hu@5    en@5    gap   trunc@5  embed p95
+bge-m3                     1024   97.7%   90.7%    97.7%  0.807   96.8%  100.0%    3.2%   100.0%    677 ms
+paraphrase-multilingual     768   95.3%   90.7%    95.3%  0.801   93.5%  100.0%    6.5%    66.7%    646 ms
+nomic-embed-text-v2-moe     768   97.7%   88.4%    93.0%  0.785   90.3%  100.0%    9.7%   100.0%    657 ms
+granite-embedding:278m      768   86.0%   83.7%    88.4%  0.771   83.9%  100.0%   16.1%    66.7%    635 ms
+qwen3-embedding:0.6b       1024   83.7%   79.1%    83.7%  0.710   77.4%  100.0%   22.6%    33.3%    578 ms
+nomic-embed-text            768   76.7%   76.7%    76.7%  0.633   67.7%  100.0%   32.3%    33.3%    175 ms
+random-vectors (control)    768    4.7%   67.4%    65.1%  0.469   61.3%   75.0%   13.7%    33.3%      0 ms
+lexical alone (no model)      —   65.1%
+```
+
+**Only criterion 8 failed, and it is a CPU number.** The three fixes each changed
+the ranking:
+
+- **Staged fusion beat flat on every model** — `bge-m3` from 90.7% to 97.7%. The
+  vote-count diagnosis was right.
+- **The truncation criterion dethroned run 1's winner.**
+  `paraphrase-multilingual` scores **66.7%** where `bge-m3` scores **100%**. Its
+  512-token window is real and now visible.
+- **The language gap widened once long items existed**, from 25.0 to 32.3 points
+  for the English-first model, and past the 15-point threshold for `granite`.
 
 ---
 
@@ -97,11 +138,72 @@ combining them. The harness now measures both:
 - **flat** — `RRF(lex, tri, vec)`, what run 1 measured
 - **staged** — `RRF(RRF(lex, tri), vec)`, one lexical vote against one vector vote
 
-**Run 2 decides between them, and it is allowed to conclude that neither beats the
-vector index alone.** If staged also loses, ADR-0010 is carrying two lexical
-indexes for a memory system that would retrieve better without them, and the ADR
-should be amended rather than defended. Nothing in run 1 settles that, because run
-1 only measured the arithmetic that was wrong.
+Run 2 confirmed the diagnosis: **staged beat flat on every model**, by up to 7
+points. The arithmetic was wrong and fixing it recovered most of the loss.
+
+### But fixing the arithmetic did not save the design
+
+With staged fusion and the best model, this is the comparison that matters:
+
+| `bge-m3` | recall@1 | recall@5 | MRR |
+|---|---|---|---|
+| vector index alone | **86.0%** | 97.7% | **0.916** |
+| staged fusion | 69.8% | 97.7% | 0.807 |
+| | **−16.2 points** | tie | **−0.109** |
+
+**Adding the lexical indexes to a good vector index makes retrieval worse.** Not
+in run 1's broken arithmetic — in run 2, with the fusion done properly.
+
+And the effect has a shape. Per-model deltas, fused against vector-alone:
+
+| model | its own vec@5 | Δ recall@1 | Δ MRR |
+|---|---|---|---|
+| `bge-m3` | 97.7% | **−16.2** | −0.109 |
+| `nomic-embed-text-v2-moe` | 97.7% | **−14.0** | −0.097 |
+| `paraphrase-multilingual` | 95.3% | 0.0 | −0.015 |
+| `qwen3-embedding:0.6b` | 83.7% | −6.9 | −0.038 |
+| `granite-embedding:278m` | 86.0% | **+2.4** | −0.004 |
+| `nomic-embed-text` | 76.7% | −7.0 | −0.033 |
+
+**The lexical indexes are a floor for weak retrieval and a ceiling for strong
+retrieval.** The only model fusion helps at recall@1 is one of the two included
+because it was expected to lose. The better the vector index, the more the
+lexical half costs.
+
+### Criterion 5 passed anyway, and that is a problem worth naming
+
+Run 2 reported `PASS` on criterion 5: staged recall@5 of 97.7% against
+vector-alone's 97.7%, a dead tie, which cleared a `≥` comparator — **the same
+comparator this report loosened after run 1.**
+
+That is exactly the failure the loosening was warned about, arriving one run
+later. Recall@5 asks only whether the right memory landed somewhere in the top
+five; it cannot see a 16-point collapse in recall@1 or 0.11 of MRR.
+
+**Criterion 5 now judges on MRR**, and the reason is a design constraint rather
+than a preference between statistics. The retrieved-context block has a token
+budget — spike 0003 measured roughly 2,500 tokens of it — so a memory ranked
+fifth arrives surrounded by four irrelevant ones and competes with them for the
+agent's attention, or gets cut. Rank inside the window is not free, and MRR is
+what registers it.
+
+On MRR, criterion 5 **fails**: 0.807 against 0.916.
+
+### What this means for ADR-0010
+
+ADR-0010 carries `unicode61` + `trigram` + vectors and fuses them. On this
+evidence the fusion is not justified, but **deleting the lexical indexes does not
+follow either** — the mechanism breakdown shows them carrying `diacritics`
+queries at MRR 1.000, and exact-match retrieval (an invoice number, a name, a
+date) is a case no embedding handles reliably and this test set barely contains.
+
+The shape that fits the data is **lexical as a specialist, not a co-equal voter**:
+vector search as the default path, with the lexical indexes consulted for exact
+tokens or when vector confidence is low. That is a design change, it needs its own
+measurement, and it should be an ADR amendment rather than a quiet edit.
+
+**This spike does not make that change. It establishes that the current one is
+wrong.**
 
 ## Finding 2 — ADR-0012's fear is real, but its heuristic is not
 
@@ -129,6 +231,12 @@ reputation" — while refuting the shortcut anyone would reach for instead. Wort
 recording, because the shortcut is much cheaper than the measurement and would
 have looked responsible.
 
+Run 2 sharpened both halves of this. With long items in the set, the English-first
+model's gap widened from 25.0 to **32.3 points** — the failure mode gets worse on
+harder material, which is the opposite of reassuring. And `granite`, whose card
+still does not list Hungarian, still finished mid-table at 83.9%, though its gap
+crossed the 15-point threshold at 16.1.
+
 ## Finding 3 — the test set chose the winner
 
 `paraphrase-multilingual` came first: best MRR, tied best recall@5, half the size
@@ -153,6 +261,27 @@ dimension will crown whichever candidate is weakest on it.*
 each, with the queried fact deliberately in the **last sentence**. If a model
 truncates, those three queries fail and nothing else changes.
 
+Run 2 settled it:
+
+| model | context window | truncation recall@5 |
+|---|---|---|
+| `bge-m3` | 8192 | **100.0%** |
+| `nomic-embed-text-v2-moe` | 512 (Ollama default ctx) | 100.0% |
+| `paraphrase-multilingual` | **512** | **66.7%** |
+| `granite-embedding:278m` | 512 | 66.7% |
+| `qwen3-embedding:0.6b` | 32k | 33.3% |
+| `nomic-embed-text` | 8192 | 33.3% |
+
+Run 1's winner loses a third of the long-item queries. `bge-m3` loses none. **The
+criterion that did not exist a day ago is the one that picked the default model.**
+
+The bottom two rows are worth noting as an unexplained result rather than a
+finding: `qwen3-embedding` has a 32k window and still scored 33.3%, so its
+weakness on these items is not truncation. It also dropped between runs on the
+short items, which the added query instruction was supposed to improve. Something
+about this candidate is not understood, and the honest position is to say so
+rather than to attribute its loss to a cause that does not fit.
+
 ## What changed for run 2, and how to judge the changes
 
 | Change | Why | Direction |
@@ -175,19 +304,40 @@ The `qwen3-embedding` change is worth being precise about: the instruction is
 worth 1–5% by its own card, and qwen3 lost by 10 points of vector recall@5. **The
 handicap does not explain its result**, so this is a fairness fix, not a rescue.
 
+## The decision
+
+**`bge-m3` is the default embedding model.** It is first on MRR, tied first on
+recall@5, has the narrowest language gap at 3.2 points, is the only model that
+loses nothing on long items, and it is **MIT** — the most permissive licence in
+the field, which matters because every user inherits the default.
+
+`embeddinggemma` was measured on request and is recorded, but is **not eligible to
+be the default**: it ships under the Gemma Terms of Use, which carry use
+restrictions and downstream obligations that MIT and Apache-2.0 do not. The
+harness refuses to name a non-OSI model as the default regardless of where it
+lands in the table, and says so out loud when it scores highest.
+
+This is a decision on the public set. The private set of real material can
+overturn it, and if it does, the private number wins.
+
 ## What this does **not** establish
 
-- **Nothing about the default model.** The winner is under a truncation cloud and
-  the runner-up was measured with a fusion strategy now known to be wrong. Run 2,
-  on a GPU, with the private set, decides it.
-- **Nothing about scale.** Thirty-eight items, so recall@5 is the top 13% of the
+- **Nothing about latency as deployed.** Ollama ran on the CPU for both runs, so
+  criterion 8's failure at 677 ms is a measurement of a 48-core Xeon. The GPU
+  question is open.
+- **Nothing about scale.** Forty-one items, so recall@5 is the top 12% of the
   corpus — an easy target. Real memory holds thousands, where lexical precision
-  matters more than it can here, and where the fusion question may answer
-  differently.
-- **Nothing about latency as deployed**, because the model ran on the CPU.
+  matters more than it can here, and **the fusion finding may not survive it**:
+  the case for a lexical index is strongest exactly where this test set is
+  weakest.
+- **Nothing about exact-match retrieval.** Invoice numbers, names, dates — the
+  queries embeddings are worst at and lexical indexes are built for. The set
+  barely contains any, which is precisely why the fusion result should be read as
+  "not justified on this evidence" rather than "the lexical indexes are useless".
+- **`qwen3-embedding`'s result is not understood**, as set out above.
 - **The public set remains circular.** Its queries were written alongside its
-  items. The private set of real material is what settles the default; both
-  numbers will be published, and where they disagree the private one wins.
+  items. The private set of real material is what confirms or overturns the
+  default; both numbers get published.
 
 ## Reproducing it
 
