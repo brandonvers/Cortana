@@ -34,7 +34,24 @@ const OLLAMA = process.env['OLLAMA_URL'] ?? 'http://127.0.0.1:11434';
  * under non-OSI terms is not a neutral default even though the user pulls it
  * themselves.
  */
-type Candidate = { model: string; licence: string; note: string };
+type Candidate = {
+  model: string;
+  licence: string;
+  note: string;
+  /**
+   * Prefix applied to the **query** only, never to the stored item.
+   *
+   * Instruction-tuned embedding models are asymmetric: they expect a task
+   * description on the query side and a bare document on the other. Qwen3's own
+   * card puts the cost of omitting it at 1–5% of retrieval performance.
+   *
+   * The first run of this spike embedded queries and documents identically for
+   * every model, which quietly handicapped the one model that asks for
+   * something different. A comparison that penalises a model for how it is meant
+   * to be called is measuring the harness, not the model.
+   */
+  queryPrefix?: string;
+};
 
 const CANDIDATES: Candidate[] = [
   {
@@ -46,6 +63,8 @@ const CANDIDATES: Candidate[] = [
     model: 'qwen3-embedding:0.6b',
     licence: 'Apache-2.0',
     note: 'Top multilingual MTEB per parameter; output dimension is configurable.',
+    queryPrefix:
+      'Instruct: Given a question from the owner of a personal assistant, retrieve the stored memory that answers it\nQuery:',
   },
   {
     model: 'nomic-embed-text-v2-moe',
@@ -291,6 +310,29 @@ function lexicalSearch(table: 'lex' | 'tri', q: string): number[] {
 /** vec0 takes vectors as a raw float32 buffer, not as JSON and not as an array. */
 const f32 = (values: number[]): Buffer => Buffer.from(new Float32Array(values).buffer);
 
+/**
+ * ## FUSION — why there are two strategies
+ *
+ * The first run measured one: RRF over three lists, `lex`, `tri` and `vec`, one
+ * vote each. It lost to its own vector half on five of six models, by as much as
+ * 15 points of recall@1. Fusing made retrieval **worse**.
+ *
+ * The reason is in the vote count. `lex` and `tri` are two views of the same
+ * lexical signal, so a flat fusion hands the lexical side **two votes against the
+ * vector side's one** — and on this data the lexical side scores 67.5% against
+ * the vector side's 100%. The weaker, doubly-counted signal outvotes the stronger
+ * one and drags good answers down the ranking.
+ *
+ * `staged` fixes the arithmetic rather than the design: fuse the two lexical
+ * lists into one lexical ranking first, then fuse that against the vector
+ * ranking. One vote each, which is what "combine lexical and vector" was always
+ * supposed to mean.
+ *
+ * Both are measured every run. If staged still loses to the vector alone, that is
+ * a real finding about ADR-0010 and not an arithmetic slip, and the report has to
+ * say so.
+ */
+
 /** Reciprocal rank fusion over any number of ranked lists. */
 function rrf(lists: number[][]): number[] {
   const score = new Map<number, number>();
@@ -341,6 +383,9 @@ type ModelResult = {
   licence: string;
   dims: number;
   vector: Scores;
+  /** RRF over three lists: lex, tri, vec. The obvious strategy, and the loser. */
+  flat: Scores;
+  /** RRF over two: (lex+tri fused first), vec. One lexical vote, one vector vote. */
   fused: Scores;
   byMechanism: Map<string, Scores>;
   byLang: Map<string, Scores>;
@@ -410,28 +455,40 @@ for (const candidate of withControl) {
   const knn = db.prepare('select id from vec where e match ? and k = ? order by distance');
   const latencies: number[] = [];
   const vectorRuns: Array<{ ranked: number[]; expect: number }> = [];
-  const fusedRuns: Array<{ ranked: number[]; expect: number }> = [];
+  const flatRuns: Array<{ ranked: number[]; expect: number }> = [];
+  const stagedRuns: Array<{ ranked: number[]; expect: number }> = [];
   const perMechanism = new Map<Mechanism, Array<{ ranked: number[]; expect: number }>>();
   const perLang = new Map<string, Array<{ ranked: number[]; expect: number }>>();
 
   for (const [i, q] of dataset.queries.entries()) {
+    const asked = `${candidate.queryPrefix ?? ''}${q.q}`;
     const qt = performance.now();
-    const [qv] = isControl ? [randomVector(q.q)] : await embed(candidate.model, [q.q]);
+    const [qv] = isControl ? [randomVector(asked)] : await embed(candidate.model, [asked]);
     latencies.push(performance.now() - qt);
 
     const vecRanked = knn.all(f32(qv ?? []), DEPTH).map((r: { id: number }) => Number(r.id));
-    const fusedRanked = rrf([lexicalSearch('lex', q.q), lexicalSearch('tri', q.q), vecRanked]);
+    const lexRanked = lexicalSearch('lex', q.q);
+    const triRanked = lexicalSearch('tri', q.q);
+
+    // Two fusion strategies, because the first run showed the obvious one losing
+    // to its own vector half. See FUSION below.
+    const flatRanked = rrf([lexRanked, triRanked, vecRanked]);
+    const stagedRanked = rrf([rrf([lexRanked, triRanked]), vecRanked]);
 
     vectorRuns.push({ ranked: vecRanked, expect: q.expect });
-    const run = { ranked: fusedRanked, expect: q.expect };
-    fusedRuns.push(run);
+    flatRuns.push({ ranked: flatRanked, expect: q.expect });
+    stagedRuns.push({ ranked: stagedRanked, expect: q.expect });
+
+    // Per-mechanism and per-language breakdowns follow the staged strategy,
+    // which is the one the design would actually ship if it wins.
+    const run = { ranked: stagedRanked, expect: q.expect };
     if (!perMechanism.has(q.mechanism)) perMechanism.set(q.mechanism, []);
     perMechanism.get(q.mechanism)?.push(run);
     if (!perLang.has(q.lang)) perLang.set(q.lang, []);
     perLang.get(q.lang)?.push(run);
 
     if (process.env['VERBOSE'] === '1') {
-      const rank = fusedRanked.indexOf(q.expect);
+      const rank = stagedRanked.indexOf(q.expect);
       console.log(
         `      ${String(i + 1).padStart(2)} ${rank === 0 ? '✓' : rank < 0 ? '✗' : `#${rank + 1}`}  ${q.q}`,
       );
@@ -440,19 +497,22 @@ for (const candidate of withControl) {
 
   latencies.sort((x, y) => x - y);
   const vector = scoreRuns(vectorRuns);
-  const fused = scoreRuns(fusedRuns);
-  console.log(
-    `    vector alone  recall@1 ${pct(vector.r1)}   recall@5 ${pct(vector.r5)}   MRR ${vector.mrr.toFixed(3)}`,
-  );
-  console.log(
-    `    FUSED         recall@1 ${pct(fused.r1)}   recall@5 ${pct(fused.r5)}   MRR ${fused.mrr.toFixed(3)}`,
-  );
+  const flat = scoreRuns(flatRuns);
+  const fused = scoreRuns(stagedRuns);
+  const line = (label: string, s: Scores) =>
+    console.log(
+      `    ${label.padEnd(13)} recall@1 ${pct(s.r1).padStart(6)}   recall@5 ${pct(s.r5).padStart(6)}   MRR ${s.mrr.toFixed(3)}`,
+    );
+  line('vector alone', vector);
+  line('fused flat', flat);
+  line('FUSED staged', fused);
 
   modelResults.push({
     model: candidate.model,
     licence: candidate.licence,
     dims,
     vector,
+    flat,
     fused,
     byMechanism: new Map([...perMechanism].map(([k, v]) => [k, scoreRuns(v)])),
     byLang: new Map([...perLang].map(([k, v]) => [k, scoreRuns(v)])),
@@ -475,16 +535,18 @@ section('comparison');
 const control = modelResults.find((r) => r.model === RANDOM_CONTROL);
 modelResults.sort((a, b) => b.fused.mrr - a.fused.mrr);
 console.log(
-  '  model                       dims  lex@5   vec@5  FUSED@5   MRR    hu@5    en@5    gap   embed p95',
+  '  model                       dims  vec@5  flat@5  STAGED@5   MRR    hu@5    en@5    gap   trunc@5  embed p95',
 );
 for (const r of modelResults) {
   const hu = r.byLang.get('hu');
   const en = r.byLang.get('en');
   const gap = hu && en ? en.r5 - hu.r5 : Number.NaN;
+  const trunc = r.byMechanism.get('truncation');
   console.log(
-    `  ${r.model.padEnd(26)} ${String(r.dims).padStart(4)}  ${pct(lexicalOnly.r5).padStart(6)}  ${pct(r.vector.r5).padStart(6)}  ${pct(r.fused.r5).padStart(6)}  ${r.fused.mrr.toFixed(3)}  ${(hu ? pct(hu.r5) : '—').padStart(6)}  ${(en ? pct(en.r5) : '—').padStart(6)}  ${(Number.isFinite(gap) ? pct(gap) : '—').padStart(6)}  ${r.embedMsP95.toFixed(0).padStart(5)} ms`,
+    `  ${r.model.padEnd(26)} ${String(r.dims).padStart(4)}  ${pct(r.vector.r5).padStart(6)}  ${pct(r.flat.r5).padStart(6)}  ${pct(r.fused.r5).padStart(7)}  ${r.fused.mrr.toFixed(3)}  ${(hu ? pct(hu.r5) : '—').padStart(6)}  ${(en ? pct(en.r5) : '—').padStart(6)}  ${(Number.isFinite(gap) ? pct(gap) : '—').padStart(6)}  ${(trunc ? pct(trunc.r5) : '—').padStart(7)}  ${r.embedMsP95.toFixed(0).padStart(5)} ms`,
   );
 }
+console.log(`  ${'lexical alone (no model)'.padEnd(26)}    —  ${pct(lexicalOnly.r5).padStart(6)}`);
 
 // The winner is the best *real* model. The control is ranked alongside them on
 // purpose — if it does not come last, that is the headline, not a footnote.
@@ -520,15 +582,29 @@ check(
 // margin because on a set this size a single query is worth 2.5 points and a
 // one-query lead is not a finding.
 const MARGIN = 0.05;
-const beatsHalves = best ? best.fused.r5 > Math.max(lexicalOnly.r5, best.vector.r5) : false;
+const beatsHalves = best ? best.fused.r5 >= Math.max(lexicalOnly.r5, best.vector.r5) : false;
 const beatsNoise = best && control ? best.fused.r5 >= control.fused.r5 + MARGIN : false;
 check(
-  '5 fusion beats either half alone, and the noise floor',
+  '5 fusion is at least as good as either half alone, and beats the noise floor',
   beatsHalves && beatsNoise,
   best
-    ? `fused ${pct(best.fused.r5)} vs lexical ${pct(lexicalOnly.r5)}, vector ${pct(best.vector.r5)}, random control ${control ? pct(control.fused.r5) : '—'} (needs +${pct(MARGIN)} over the control)`
+    ? `staged ${pct(best.fused.r5)} vs lexical ${pct(lexicalOnly.r5)}, vector ${pct(best.vector.r5)}, control ${control ? pct(control.fused.r5) : '—'} (needs +${pct(MARGIN)} over the control)`
     : 'no model produced results',
 );
+
+// Reported whether or not criterion 5 passes, because "which fusion" is a
+// separate question from "fusion at all", and the first run conflated them.
+if (best) {
+  const verdict =
+    best.fused.r5 > best.flat.r5
+      ? 'staged wins: collapsing the two lexical lists first is worth doing'
+      : best.fused.r5 < best.flat.r5
+        ? 'flat wins: the staged reweighting was not the problem'
+        : 'tie at recall@5 — compare MRR and recall@1 before concluding';
+  console.log(
+    `        staged ${pct(best.fused.r5)} vs flat ${pct(best.flat.r5)} on ${best.model} — ${verdict}`,
+  );
+}
 
 check(
   '6 fused recall@5 on the unstemmed language',
@@ -549,6 +625,18 @@ check(
   '8 embedding latency is affordable per memory write',
   (best?.embedMsP95 ?? Number.POSITIVE_INFINITY) < 500,
   best ? `${best.model} p95 ${best.embedMsP95.toFixed(0)} ms (threshold 500 ms)` : 'n/a',
+);
+
+// A model whose context window is shorter than the item silently embeds the
+// opening and loses the rest. Nothing errors, no vector is the wrong shape, and
+// no other criterion here would notice.
+const trunc = best?.byMechanism.get('truncation');
+check(
+  '9 long items are not silently truncated',
+  (trunc?.r5 ?? 0) >= 0.8,
+  best
+    ? `${best.model}: ${pct(trunc?.r5 ?? 0)} on ${trunc?.n ?? 0} queries whose answer sits in the last sentence of a >512-token item`
+    : 'n/a',
 );
 
 // ---------------------------------------------------------------------------

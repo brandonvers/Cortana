@@ -65,7 +65,18 @@ export type Mechanism =
   /** Possessive or colloquial form against the stored one. */
   | 'possessive'
   /** Other items share vocabulary with the query; only one is right. */
-  | 'distractor';
+  | 'distractor'
+  /**
+   * The item is longer than a short model's context window, and the queried
+   * fact sits in its last sentence.
+   *
+   * Added after the first run, which was won by a 512-token model on a set where
+   * every item was one sentence. That is not a comparison, it is a pitch the
+   * winner was allowed to choose. A model that truncates at 512 tokens does not
+   * error — it embeds the first part and silently loses the rest, which is the
+   * exact failure ADR-0012 exists to prevent.
+   */
+  | 'truncation';
 
 export type Item = { id: number; lang: 'hu' | 'en'; text: string };
 export type Query = { q: string; expect: number; lang: 'hu' | 'en'; mechanism: Mechanism };
@@ -260,6 +271,84 @@ const HU_QUERIES: Query[] = [
 ];
 
 /**
+ * Long items, with the queried fact deliberately in the **last sentence**.
+ *
+ * Every one of these is longer than 512 tokens in Hungarian, which tokenises
+ * poorly — a model with a short context window embeds the opening and never sees
+ * the ending. Nothing warns you: the vector comes back the right shape, the
+ * query returns results, and the right memory is simply never among them.
+ *
+ * These exist because the first run of this spike was won by a 512-token model
+ * on a set of one-sentence items. The test set had decided the winner.
+ */
+const LONG_ITEMS: Item[] = [
+  {
+    id: 201,
+    lang: 'hu',
+    text: [
+      'Feljegyzés a lakásfelújításról. A tervezés még tavasszal elkezdődött, amikor kiderült, hogy a fürdőszoba csempézése alatt a vakolat több helyen elázott, és a javítás nem oldható meg egy egyszerű átfestéssel.',
+      'Az első mesterember, aki kijött felmérni, azt mondta, hogy a teljes falfelületet le kell verni a csempével együtt, mert a nedvesség bejutott a fal szerkezetébe, és ha csak a látható részt javítjuk, néhány hónapon belül újra megjelenik a penész.',
+      'A második vállalkozó ennél óvatosabb volt, és javasolta, hogy először szárítsuk ki a falat, mielőtt bármilyen bontásba kezdenénk, mert lehet, hogy a probléma forrása nem a fürdőszobában van, hanem a szomszédos konyhában futó vízvezetékben.',
+      'Ezt követően felkerestünk egy harmadik szakembert is, aki nedvességmérővel végigmérte a falakat, és megerősítette, hogy a konyha felőli oldal határozottan nedvesebb, tehát a vezetéket mindenképpen meg kell nézni, mielőtt bármit visszaépítenénk.',
+      'A költségekről is beszéltünk hosszan, mert a három ajánlat között jelentős eltérés volt, és nem volt azonnal világos, hogy a különbség a munka minőségéből, az anyagok árából, vagy egyszerűen az eltérő ütemezésből adódik-e.',
+      'Az anyagbeszerzést végül úgy oldottuk meg, hogy a csempét és a ragasztót magunk vettük meg egy nagykereskedésben, a munkadíjat pedig külön állapodtuk meg, ami összességében olcsóbbnak bizonyult, mint a teljes körű ajánlatok bármelyike.',
+      'Az ütemezés miatt a munka végül két szakaszra bomlott, mert a szárítás önmagában közel három hetet vett igénybe, és addig a fürdőszobát nem lehetett rendeltetésszerűen használni.',
+      'Volt egy vita arról is, hogy érdemes-e egyúttal a padlófűtést is kiépíteni, mivel a padló amúgy is felbontásra kerül, és később már sokkal drágább lenne visszatérni rá.',
+      'Végül a döntés az lett, hogy a padlófűtés kimarad, mert a rendszer átalakítása a kazánt is érintené, és arra idén nincs keret.',
+      'A lényeg, amit meg kell jegyezni: a felújítás alatti időszakra a biztosító külön lakhatási támogatást fizet, de csak akkor, ha a kárbejelentés a bontás megkezdése előtt megtörtént.',
+    ].join(' '),
+  },
+  {
+    id: 202,
+    lang: 'hu',
+    text: [
+      'Összefoglaló az autó szervizeléséről és a hozzá tartozó ügyintézésről. A kocsi január óta furcsa hangot adott indításkor, főleg hideg időben, és eleinte azt hittük, hogy az akkumulátor gyengült le a tél miatt.',
+      'A szerviz először valóban az akkumulátort mérte meg, és az eredmény határértéken volt, tehát nem lehetett egyértelműen kizárni, de nem is magyarázta meg teljesen a jelenséget.',
+      'A második alkalommal az önindítót vizsgálták meg, és kiderült, hogy a bendix fogaskerék kopott, ami pontosan azt a csikorgó hangot okozza, amit hallottunk, de a csere nem sürgős, amíg a motor elindul.',
+      'Szóba került a vezérműszíj is, mert a szervizkönyv szerint a csere esedékessé vált volna a következő tízezer kilométeren belül, és ha az önindítót amúgy is szétszedik, akkor a két munka részben összevonható.',
+      'Az árajánlat ezért két változatban készült el, egy szűkebbre szabott javítással és egy teljesebb csomaggal, amelyben a szíj, a vízpumpa és a feszítőgörgő is benne van.',
+      'A tulajdonos hosszan mérlegelte, hogy megéri-e a nagyobb csomag, tekintve hogy az autó életkora és futásteljesítménye alapján a következő két évben amúgy is számítani lehet további javításokra.',
+      'Külön téma volt a biztosítás, mert az évfordulós felmondási határidő éppen a szerviz idejére esett, és ha akkor nem történik intézkedés, a szerződés automatikusan meghosszabbodik a régi díjjal.',
+      'A gumicseréről is beszéltünk, mivel a nyári gumik profilmélysége már a törvényi határ közelében járt, és a nyaralásra tervezett hosszabb út előtt ez kockázatos lett volna.',
+      'A szerviz azt javasolta, hogy a gumikat a javítással egy időben cseréljük, mert így a kerekek levételéért nem számolnak fel külön munkadíjat.',
+      'Amit fontos megjegyezni: a szerviz a garanciát csak akkor vállalja a javításra, ha a következő ellenőrzés hatvan napon belül megtörténik.',
+    ].join(' '),
+  },
+  {
+    id: 203,
+    lang: 'hu',
+    text: [
+      'Jegyzet a költözésről és az ahhoz kapcsolódó teendőkről. Az új lakás átvétele eredetileg a hónap elejére volt kitűzve, de a korábbi bérlő kérte a határidő eltolását, mert az ő új lakhatása csúszott.',
+      'Ez az egész ütemtervet felborította, mert a bútorszállítást már lefoglaltuk, és a cég a lemondásért díjat számol fel, ha az a szállítás előtt kevesebb mint egy héttel történik.',
+      'A dobozolást szerencsére korábban elkezdtük, így a ruhák és a könyvek nagy része már be volt csomagolva, de a konyhai eszközök még mindig használatban voltak, azokat nem lehetett előre elpakolni.',
+      'Az internetszolgáltatóval külön kellett egyeztetni, mert az átköltöztetés nem automatikus, és az új címen csak akkor tudják aktiválni a szolgáltatást, ha a régi címen már lezárták.',
+      'A közüzemi mérőórák átírása is külön ügyintézést igényelt, mindegyik szolgáltatónál másképp, és az egyiknél személyes megjelenés is kellett, amit nehéz volt beilleszteni a munkaidőbe.',
+      'A régi lakásban maradt néhány beépített bútor, amelyekről meg kellett állapodni a tulajdonossal, hogy ott maradnak-e vagy elvisszük őket, mert a szerződés erről nem rendelkezett egyértelműen.',
+      'A takarítást végül külön cégre bíztuk, mert az átadás feltétele a tiszta állapot volt, és a költözés napján erre már nem maradt volna energia.',
+      'A postai átirányítást is meg kellett igényelni, mert több hivatalos levél érkezik még a régi címre, és ezek egy részének határideje van.',
+      'A kulcsok átadásáról jegyzőkönyvet készítettünk, amelyben rögzítettük a mérőórák állását és a lakás állapotát, fényképekkel együtt.',
+      'A legfontosabb, ami könnyen elfelejtődik: a kaució visszafizetésére a tulajdonosnak harminc napja van az átadás-átvételi jegyzőkönyv aláírásától számítva.',
+    ].join(' '),
+  },
+];
+
+const LONG_QUERIES: Query[] = [
+  { q: 'Meddig kell visszafizetni a kauciót?', expect: 203, lang: 'hu', mechanism: 'truncation' },
+  {
+    q: 'Mi a feltétele a szerviz garanciájának?',
+    expect: 202,
+    lang: 'hu',
+    mechanism: 'truncation',
+  },
+  {
+    q: 'Mikor kell bejelenteni a kárt a biztosítónak?',
+    expect: 201,
+    lang: 'hu',
+    mechanism: 'truncation',
+  },
+];
+
+/**
  * English control. Same shapes, same distractor pressure, minus the two
  * mechanisms English does not have. The number that matters is not this set's
  * score but its **distance** from the Hungarian one.
@@ -359,9 +448,9 @@ const EN_QUERIES: Query[] = [
 ];
 
 export const PUBLIC_DATASET: Dataset = {
-  name: 'public (hu + en control)',
-  items: [...HU_ITEMS, ...EN_ITEMS],
-  queries: [...HU_QUERIES, ...EN_QUERIES],
+  name: 'public (hu + long + en control)',
+  items: [...HU_ITEMS, ...LONG_ITEMS, ...EN_ITEMS],
+  queries: [...HU_QUERIES, ...LONG_QUERIES, ...EN_QUERIES],
 };
 
 /**
