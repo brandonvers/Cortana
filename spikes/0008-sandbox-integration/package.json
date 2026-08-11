@@ -1,0 +1,13 @@
+{
+  "name": "spike-0008-sandbox-integration",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway: verifies Claude Code's sandbox switches behave as documented, including whether a missing sandbox fails loudly",
+  "scripts": {
+    "start": "node run.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.226"
+  }
+}

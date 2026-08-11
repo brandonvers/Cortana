@@ -1,0 +1,9 @@
+# This file makes the spike its own pnpm workspace root, so it resolves
+# independently of the repository's workspace and can pin its own versions.
+packages:
+  - '.'
+
+# The SDK ships a platform-native `claude` binary as an optional dependency and
+# needs its install script to place it.
+allowBuilds:
+  '@anthropic-ai/claude-agent-sdk': true
