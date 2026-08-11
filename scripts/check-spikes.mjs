@@ -137,7 +137,15 @@ for (const file of files) {
   // A shared module obviously refers to its own exports without importing them.
   const isSharedModule = !rel.includes('/');
   if (!isSharedModule) {
-    const withoutImports = source.replace(importRe, '');
+    // Comments are stripped before looking for uses, because a name mentioned in
+    // prose is not a use. This fired on a doc comment that said "deliberately not
+    // called `MODEL`" — the check reporting an error for explaining why the error
+    // does not apply. A check that goes off on prose is one people learn to
+    // ignore, which costs more than the false positive does.
+    const withoutImports = source
+      .replace(importRe, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1');
     for (const [name, from] of sharedExports) {
       if (imported.has(name)) continue;
       if (new RegExp(`\\b${name}\\b`).test(withoutImports)) {
