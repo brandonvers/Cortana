@@ -46,6 +46,38 @@ Criterion 5 is the one that justifies keeping anything. If no strategy beats pur
 vector on a set deliberately built to contain lexical search's best case, nothing
 will.
 
+**All criteria are evaluated at the largest corpus size.** See below for why that
+is not a detail.
+
+## Scale is the variable, and run 1 got this wrong
+
+The first run of this spike measured **one corpus size, 28 items**, and every
+strategy scored 100% recall@1 on the exact half — pure vector search included.
+Two things followed, and only one of them was interesting.
+
+The dull one: the hypothesis was refuted at that size. `bge-m3` separates
+`2026/0847` from `2026/0874` perfectly well when they are the only two candidates
+that look alike.
+
+The useful one: **four strategies tied at MRR 1.000, so the test ranked nothing.**
+A benchmark whose baseline scores full marks has no headroom and cannot tell any
+two approaches apart. It was not evidence that vector search wins; it was evidence
+that the question had been asked at a size where it does not arise.
+
+At 28 items a query naming an invoice number has to beat **one** near-identical
+rival. A real memory holds thousands, and forty invoices from the same customer
+differing only in a number is a different problem. Spike 0006 recorded "nothing
+about scale" as its own limitation, and this spike then walked into it.
+
+So the corpus is padded with generated distractors in the same shape as the real
+items, and the result is a **curve over corpus size** — 28, 100, 300, 1000 by
+default, settable with `SCALES=`. The question changes from *"does vector search
+handle identifiers"*, which has no fixed answer, to **"up to what corpus size does
+it"**, which does.
+
+Everything is embedded once at the largest size and each smaller point reuses a
+prefix, so the curve costs one embedding pass rather than one per point.
+
 ## The strategies
 
 All five run on the same embeddings and the same indexes, so the comparison is
@@ -94,4 +126,9 @@ pnpm start
 |---|---|---|
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | |
 | `EMBED_MODEL` | `bge-m3` | The default chosen in 0006. |
-| `VERBOSE` | off | `VERBOSE=1` prints per-query ranks for every strategy. |
+| `SCALES` | `28,100,300,1000` | Corpus sizes to measure. The largest sets the embedding cost and is where the criteria are judged. |
+| `VERBOSE` | off | `VERBOSE=1` prints per-query ranks at the largest scale. |
+
+Embedding ~1000 items on a CPU-only Ollama takes several minutes — spike 0006
+measured `bge-m3` at roughly 250 ms per item. That pass is the only slow part;
+everything after it is instant. `SCALES=28,100` is a quick sanity run.

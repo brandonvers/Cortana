@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 import { arch, cpus, release, totalmem, type } from 'node:os';
 import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
-import { DATASET, type Half, type Query, validate } from './dataset.ts';
+import { DATASET, distractors, type Half, type Query, validate } from './dataset.ts';
 
 const OLLAMA = process.env['OLLAMA_URL'] ?? 'http://127.0.0.1:11434';
 /**
@@ -108,27 +108,66 @@ sqliteVec.load(db);
 console.log(`  sqlite          ${db.prepare('select sqlite_version() v').get().v}`);
 console.log(`  sqlite-vec      ${db.prepare('select vec_version() v').get().v}`);
 
-db.exec('create virtual table lex using fts5(body, tokenize = "unicode61 remove_diacritics 2")');
-db.exec('create virtual table tri using fts5(body, tokenize = "trigram")');
-const insLex = db.prepare('insert into lex(rowid, body) values (?, ?)');
-const insTri = db.prepare('insert into tri(rowid, body) values (?, ?)');
-for (const item of DATASET.items) {
-  insLex.run(item.id, item.text);
-  insTri.run(item.id, item.text);
-}
+/**
+ * Corpus sizes measured. The real items are always present; the rest are
+ * generated distractors in the same shape.
+ *
+ * Everything is embedded once, at the largest scale, and each smaller scale uses
+ * a prefix of it — so the whole curve costs one embedding pass instead of one per
+ * point. On the target machine that pass is the only slow part of this spike.
+ */
+const SCALES = (process.env['SCALES'] ?? '28,100,300,1000')
+  .split(',')
+  .map((s) => Number(s.trim()))
+  .filter((n) => Number.isFinite(n) && n >= DATASET.items.length)
+  .sort((a, b) => a - b);
 
-const itemVectors = await embed(DATASET.items.map((i) => i.text));
+const maxScale = SCALES[SCALES.length - 1] ?? DATASET.items.length;
+const padding = distractors(Math.max(0, maxScale - DATASET.items.length));
+const allItems = [...DATASET.items, ...padding];
+console.log(`  scales          ${SCALES.join(', ')}`);
+console.log(`  embedding       ${allItems.length} items — the slow step, once`);
+
+const t0 = performance.now();
+const itemVectors: number[][] = [];
+const BATCH = 32;
+for (let i = 0; i < allItems.length; i += BATCH) {
+  const batch = allItems.slice(i, i + BATCH);
+  itemVectors.push(...(await embed(batch.map((it) => it.text))));
+  process.stdout.write(`\r  progress        ${itemVectors.length}/${allItems.length}`);
+}
+console.log(
+  `\r  embedded        ${itemVectors.length} items in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
+);
+
 const dims = itemVectors[0]?.length ?? 0;
 const f32 = (v: number[]): Buffer => Buffer.from(new Float32Array(v).buffer);
-db.exec(
-  `create virtual table vec using vec0(id integer primary key, e float[${dims}] distance_metric=cosine)`,
-);
-const insVec = db.prepare('insert into vec(id, e) values (?, ?)');
-for (const [i, item] of DATASET.items.entries())
-  insVec.run(BigInt(item.id), f32(itemVectors[i] ?? []));
-console.log(`  indexed         ${DATASET.items.length} items, ${dims} dimensions`);
+console.log(`  dimensions      ${dims}`);
 
-const knn = db.prepare('select id from vec where e match ? and k = ? order by distance');
+/** Rebuilds all three indexes over the first `scale` items. */
+function buildIndexes(scale: number): void {
+  db.exec('drop table if exists lex');
+  db.exec('drop table if exists tri');
+  db.exec('drop table if exists vec');
+  db.exec('create virtual table lex using fts5(body, tokenize = "unicode61 remove_diacritics 2")');
+  db.exec('create virtual table tri using fts5(body, tokenize = "trigram")');
+  db.exec(
+    `create virtual table vec using vec0(id integer primary key, e float[${dims}] distance_metric=cosine)`,
+  );
+  const insLex = db.prepare('insert into lex(rowid, body) values (?, ?)');
+  const insTri = db.prepare('insert into tri(rowid, body) values (?, ?)');
+  const insVec = db.prepare('insert into vec(id, e) values (?, ?)');
+  const tx = db.transaction(() => {
+    for (let i = 0; i < scale; i++) {
+      const item = allItems[i];
+      if (!item) continue;
+      insLex.run(item.id, item.text);
+      insTri.run(item.id, item.text);
+      insVec.run(BigInt(item.id), f32(itemVectors[i] ?? []));
+    }
+  });
+  tx();
+}
 
 /** Tokens shorter than three characters cannot match the trigram tokenizer. */
 function tokens(q: string): string[] {
@@ -255,11 +294,9 @@ function scoreRuns(runs: Array<{ ranked: number[]; expect: number }>): Scores {
   return { r1: r1 / n, r5: r5 / n, mrr: mrr / n, n: runs.length };
 }
 
-const perStrategy = new Map<
-  string,
-  Map<Half | 'all', Array<{ ranked: number[]; expect: number }>>
->();
-const lexicalOnly = new Map<Half | 'all', Array<{ ranked: number[]; expect: number }>>();
+/** Stands in when a bucket is absent, so a missing slice reads as zero, not NaN. */
+const EMPTY: Scores = { r1: 0, r5: 0, mrr: 0, n: 0 };
+
 const push = (
   m: Map<Half | 'all', Array<{ ranked: number[]; expect: number }>>,
   q: Query,
@@ -271,43 +308,97 @@ const push = (
   }
 };
 
-let routingMs = 0;
-for (const q of DATASET.queries) {
-  const [qv] = await embed([q.q]);
-  const lists: Lists = {
-    lex: lexicalSearch('lex', q.q),
-    tri: lexicalSearch('tri', q.q),
-    vec: knn.all(f32(qv ?? []), DEPTH).map((r: { id: number }) => Number(r.id)),
-  };
+// Queries are embedded once — they do not change with the corpus.
+const queryVectors = await embed(DATASET.queries.map((q) => q.q));
 
-  push(lexicalOnly, q, rrf([ids(lists.lex), ids(lists.tri)]));
+/** Everything measured at one corpus size. */
+type ScaleResult = {
+  scale: number;
+  perStrategy: Map<string, Map<Half | 'all', Scores>>;
+  lexicalOnly: Map<Half | 'all', Scores>;
+  routingMsPerQuery: number;
+};
 
-  for (const [name, strategy] of Object.entries(STRATEGIES)) {
-    const t0 = performance.now();
-    const ranked = strategy(lists, q.q);
-    routingMs += performance.now() - t0;
-    if (!perStrategy.has(name)) perStrategy.set(name, new Map());
-    const m = perStrategy.get(name);
-    if (m) push(m, q, ranked);
-    if (VERBOSE && name === 'router-confidence') {
-      const rank = ranked.indexOf(q.expect);
-      console.log(
-        `    ${q.half === 'exact' ? 'E' : 'S'} ${rank === 0 ? '✓' : rank < 0 ? '✗' : `#${rank + 1}`}  ${q.q}`,
-      );
+const scaleResults: ScaleResult[] = [];
+
+for (const scale of SCALES) {
+  buildIndexes(scale);
+  const knn = db.prepare('select id from vec where e match ? and k = ? order by distance');
+
+  const perStrategy = new Map<
+    string,
+    Map<Half | 'all', Array<{ ranked: number[]; expect: number }>>
+  >();
+  const lexicalOnly = new Map<Half | 'all', Array<{ ranked: number[]; expect: number }>>();
+  let routingMs = 0;
+
+  for (const [qi, q] of DATASET.queries.entries()) {
+    const lists: Lists = {
+      lex: lexicalSearch('lex', q.q),
+      tri: lexicalSearch('tri', q.q),
+      vec: knn.all(f32(queryVectors[qi] ?? []), DEPTH).map((r: { id: number }) => Number(r.id)),
+    };
+
+    push(lexicalOnly, q, rrf([ids(lists.lex), ids(lists.tri)]));
+
+    for (const [name, strategy] of Object.entries(STRATEGIES)) {
+      const t0 = performance.now();
+      const ranked = strategy(lists, q.q);
+      routingMs += performance.now() - t0;
+      if (!perStrategy.has(name)) perStrategy.set(name, new Map());
+      const m = perStrategy.get(name);
+      if (m) push(m, q, ranked);
+      if (VERBOSE && name === 'router-confidence' && scale === maxScale) {
+        const rank = ranked.indexOf(q.expect);
+        console.log(
+          `    ${q.half === 'exact' ? 'E' : 'S'} ${rank === 0 ? '✓' : rank < 0 ? '✗' : `#${rank + 1}`}  ${q.q}`,
+        );
+      }
     }
   }
+
+  const summarise = (m: Map<Half | 'all', Array<{ ranked: number[]; expect: number }>>) =>
+    new Map([...m].map(([k, v]) => [k, scoreRuns(v)]));
+  scaleResults.push({
+    scale,
+    perStrategy: new Map([...perStrategy].map(([k, v]) => [k, summarise(v)])),
+    lexicalOnly: summarise(lexicalOnly),
+    routingMsPerQuery: routingMs / (DATASET.queries.length * Object.keys(STRATEGIES).length),
+  });
+  console.log(`  scale ${String(scale).padStart(5)}     measured`);
 }
-const routingPerQuery = routingMs / (DATASET.queries.length * Object.keys(STRATEGIES).length);
-console.log(`  routing cost    ${routingPerQuery.toFixed(3)} ms per query per strategy`);
+
+const largest = scaleResults[scaleResults.length - 1];
+const routingPerQuery = Math.max(...scaleResults.map((s) => s.routingMsPerQuery));
 
 // ---------------------------------------------------------------------------
-section('is exact matching actually a vector weakness?');
+section('exact-match recall@1 as the corpus grows');
+console.log('  This is the question run 1 could not ask, because it measured one size.');
+console.log('');
+const CURVE = ['vector', 'rrf-staged', 'router-shape', 'router-confidence'];
+console.log(`  strategy             ${SCALES.map((s) => String(s).padStart(7)).join('')}`);
+for (const name of CURVE) {
+  const cells = scaleResults.map((sr) => {
+    const v = sr.perStrategy.get(name)?.get('exact')?.r1;
+    return (v === undefined ? '—' : pct(v)).padStart(7);
+  });
+  console.log(`  ${name.padEnd(20)} ${cells.join('')}`);
+}
+const lexCells = scaleResults.map((sr) => pct(sr.lexicalOnly.get('exact')?.r1 ?? 0).padStart(7));
+console.log(`  ${'lexical alone'.padEnd(20)} ${lexCells.join('')}`);
 
-const vectorRuns = perStrategy.get('vector');
-const vectorExact = scoreRuns(vectorRuns?.get('exact') ?? []);
-const vectorSemantic = scoreRuns(vectorRuns?.get('semantic') ?? []);
-const lexExact = scoreRuns(lexicalOnly.get('exact') ?? []);
-const lexSemantic = scoreRuns(lexicalOnly.get('semantic') ?? []);
+// ---------------------------------------------------------------------------
+// Everything below judges the LARGEST corpus. Run 1's mistake was reporting one
+// size as though it were the answer; reporting the smallest would repeat it in
+// the other direction. The curve above is what the reader should weigh, and the
+// criteria are evaluated where the system is most like the thing being designed.
+section(`is exact matching a vector weakness at ${maxScale} items?`);
+
+const at = largest;
+const vectorExact = at?.perStrategy.get('vector')?.get('exact') ?? EMPTY;
+const vectorSemantic = at?.perStrategy.get('vector')?.get('semantic') ?? EMPTY;
+const lexExact = at?.lexicalOnly.get('exact') ?? EMPTY;
+const lexSemantic = at?.lexicalOnly.get('semantic') ?? EMPTY;
 
 console.log(
   `  vector   exact  recall@1 ${pct(vectorExact.r1)}   MRR ${vectorExact.mrr.toFixed(3)}`,
@@ -337,14 +428,14 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-section('strategies');
+section(`strategies at ${maxScale} items`);
 
 type Row = { name: string; all: Scores; exact: Scores; semantic: Scores };
-const rows: Row[] = [...perStrategy.entries()].map(([name, m]) => ({
+const rows: Row[] = [...(at?.perStrategy ?? new Map())].map(([name, m]) => ({
   name,
-  all: scoreRuns(m.get('all') ?? []),
-  exact: scoreRuns(m.get('exact') ?? []),
-  semantic: scoreRuns(m.get('semantic') ?? []),
+  all: m.get('all') ?? EMPTY,
+  exact: m.get('exact') ?? EMPTY,
+  semantic: m.get('semantic') ?? EMPTY,
 }));
 rows.sort((a, b) => b.all.mrr - a.all.mrr);
 

@@ -90,7 +90,7 @@ const EXACT_ITEMS: Item[] = [
   {
     id: 8,
     half: 'exact',
-    text: 'Időpont egyeztetve Szabó Péterrel, 2026. szeptember 41., délelőtt tíz óra, a műhelyben.',
+    text: 'Időpont egyeztetve Szabó Péterrel, 2026. szeptember 21., délelőtt tíz óra, a műhelyben.',
   },
   {
     id: 9,
@@ -175,8 +175,8 @@ const EXACT_QUERIES: Query[] = [
   },
   { q: 'Mi Nagy Erika telefonszáma?', expect: 11, half: 'exact', mechanism: 'exact-name' },
   {
-    q: 'Mikorra van megbeszélve a 2026. szeptember 14-i időpont?',
-    expect: 7,
+    q: 'Mikorra van megbeszélve a 2026. szeptember 21-i időpont?',
+    expect: 8,
     half: 'exact',
     mechanism: 'exact-date',
   },
@@ -302,6 +302,55 @@ export const DATASET: Dataset = {
   items: [...EXACT_ITEMS, ...SEMANTIC_ITEMS],
   queries: [...EXACT_QUERIES, ...SEMANTIC_QUERIES],
 };
+
+/**
+ * Distractors, generated — and the reason this spike was rewritten after its
+ * first run.
+ *
+ * Run 1 gave **every strategy 100% recall@1 on the exact half**, including pure
+ * vector search. That refuted the hypothesis this spike was built on, and it also
+ * made the whole test useless: four strategies tied at MRR 1.000, so nothing
+ * could be ranked against anything.
+ *
+ * The reason is scale, which run 1 did not vary. With 28 items, a query naming an
+ * invoice number has to beat **one** near-identical rival and 26 obviously
+ * unrelated items. `bge-m3` wins that comfortably. A real memory holds thousands,
+ * and forty invoices from the same customer differing only in a number is a
+ * different problem entirely — which is exactly the limitation
+ * [spike 0006](../../docs/spikes/0006-multilingual-retrieval.md) recorded and
+ * this spike then walked into.
+ *
+ * So the corpus is padded with items in the same shape as the real ones, and the
+ * measurement is a **curve over corpus size** rather than a single number. The
+ * question stops being "does vector search handle identifiers" and becomes **"up
+ * to what corpus size does it"**, which is the answerable version.
+ *
+ * Generation is deterministic: same scale, same corpus, same result.
+ */
+export function distractors(count: number): Item[] {
+  const out: Item[] = [];
+  const templates = [
+    (n: number) =>
+      `Számla kiállítva Kovács Autósbolt részére, sorszám 2026/${String(1000 + n).padStart(4, '0')}, összeg ${100 + (n % 90)} 400 Ft, fizetési határidő nyolc nap.`,
+    (n: number) =>
+      `Munkalap: fékbetét- és féktárcsacsere, a jármű rendszáma ${String.fromCharCode(65 + (n % 26))}${String.fromCharCode(65 + ((n * 7) % 26))}${String.fromCharCode(65 + ((n * 13) % 26))}-${String(100 + (n % 900))}, a munka becsült ideje két óra.`,
+    (n: number) =>
+      `Alkatrész megrendelve, cikkszám 11-42-7-${String(500000 + n * 7)}, szűrő, három darab, szállítás jövő kedden.`,
+    (n: number) =>
+      `Utalás beérkezett a céges számlára, közlemény SZLA-2026-${String(2000 + n).padStart(4, '0')}, összeg ${50 + (n % 40)} 000 Ft.`,
+    (n: number) =>
+      `Garanciajegy kiadva, azonosító GJ-${String(80000 + n)}, a javításra hat hónap garancia jár.`,
+    (n: number) =>
+      `Szerviz elvégezve, a kilométeróra állása ${100 + (n % 200)} ${String(100 + (n % 800)).padStart(3, '0')} km, a következő ellenőrzés tizenötezer kilométer múlva.`,
+  ];
+  for (let i = 0; i < count; i++) {
+    const template = templates[i % templates.length];
+    // Ids start well above the real items so a distractor can never be mistaken
+    // for an expected answer.
+    out.push({ id: 10_000 + i, half: 'exact', text: template?.(i) ?? '' });
+  }
+  return out;
+}
 
 /** A query pointing at a missing item produces a confident zero that looks real. */
 export function validate(d: Dataset): string[] {
