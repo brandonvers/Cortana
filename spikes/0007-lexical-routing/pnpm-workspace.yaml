@@ -1,0 +1,11 @@
+# This file makes the spike its own pnpm workspace root, so it resolves
+# independently of the repository's workspace and can pin its own versions.
+packages:
+  - '.'
+
+# better-sqlite3 is a native module. pnpm blocks build scripts by default, which
+# is the right default — but this package must compile or fetch a prebuilt binary
+# during install, and a skipped build fails confusingly at load time rather than
+# clearly at install time.
+allowBuilds:
+  better-sqlite3: true

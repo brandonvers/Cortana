@@ -305,6 +305,19 @@ Retrieval fuses a lexical index and a vector index by reciprocal rank fusion,
 weighted by salience — recency decay, access count, and the trust level of the
 source.
 
+> ⚠️ **This rule is open, not settled.** Two spikes have now measured *unweighted*
+> fusion and found it harmful: [0006](spikes/0006-multilingual-retrieval.md) cost
+> the best model 16.2 points of recall@1 and 0.109 MRR on semantic queries, and
+> [0007](spikes/0007-lexical-routing.md) found no lexical weight between 0.1 and
+> 0.9 that beat vector search alone. Neither measured the salience weighting this
+> paragraph actually specifies, and 0007 failed its own pre-registered criterion
+> and answers nothing.
+>
+> So: fusing on every query is a plausible default with evidence against one form
+> of it and no evidence for the specified form. **No replacement is proposed** —
+> the measurement that would justify one is a benchmark rather than a spike, and
+> what it needs is listed at the end of the 0007 report.
+
 ### 8.1 Language is a design constraint, not a detail
 
 SQLite's full-text search ships stemmers for a handful of languages. For a
