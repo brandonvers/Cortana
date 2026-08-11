@@ -189,13 +189,23 @@ what registers it.
 
 On MRR, criterion 5 **fails**: 0.807 against 0.916.
 
-### What this means for ADR-0010
+### What this means for the fusion rule
 
-ADR-0010 carries `unicode61` + `trigram` + vectors and fuses them. On this
-evidence the fusion is not justified, but **deleting the lexical indexes does not
-follow either** — the mechanism breakdown shows them carrying `diacritics`
-queries at MRR 1.000, and exact-match retrieval (an invoice number, a name, a
-date) is a case no embedding handles reliably and this test set barely contains.
+> **Correction, 2026-08-11.** This section originally attributed unconditional
+> fusion to [ADR-0010](../adr/0010-sqlite-storage.md). **ADR-0010 does not contain
+> it.** Its Decision names the driver, Drizzle, `sqlite-vec` and two FTS5 indexes,
+> and mentions fusion once in passing. The rule lives in
+> [CONCEPTS §8](../CONCEPTS.md), and it specifies fusion **weighted by salience**
+> — recency decay, access count, source trust — which this spike did not model.
+> Found by the adversarial review of [spike 0007](0007-lexical-routing.md); see
+> that report for why this is the second such misattribution.
+
+The design carries `unicode61` + `trigram` + vectors and fuses them. On this
+evidence the unweighted fusion is not justified, but **deleting the lexical
+indexes does not follow either** — the mechanism breakdown shows them carrying
+`diacritics` queries at MRR 1.000, and exact-match retrieval (an invoice number, a
+name, a date) is a case no embedding handles reliably and this test set barely
+contains.
 
 The shape that fits the data is **lexical as a specialist, not a co-equal voter**:
 vector search as the default path, with the lexical indexes consulted for exact

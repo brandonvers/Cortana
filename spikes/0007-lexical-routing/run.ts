@@ -1,6 +1,19 @@
 /**
  * Spike 0007 — is the lexical index a specialist or a voter?
  *
+ * ⚠️ **THIS SPIKE FAILED AND ITS NUMBERS ARE NOT EVIDENCE.** It missed its own
+ * pre-registered criterion 2 (vector recall@1 measured 75.0% against a "below
+ * 60%" bar) and an adversarial review then found four defects that invalidate the
+ * rest. Read `docs/spikes/0007-lexical-routing.md` before running it, and do not
+ * quote its output.
+ *
+ * The four, in short: the distractor ranges ascend from a floor so crowding
+ * arrives *after* the drop it was supposed to cause; every queried identifier is
+ * unique by construction, so "lexical is scale-independent" is a property of the
+ * generator; the two winning arms are the only ones that skip the trigram index,
+ * confounding the gate with dropping it; and one query in twelve has 120 valid
+ * answers. It is kept because the defects are easier to see in running code.
+ *
  * Throwaway. See README.md for the pass criteria, written down before this ran.
  * **Consumes no AI usage.**
  *
@@ -233,14 +246,31 @@ const looksExact = (q: string): boolean => IDENTIFIER.test(q);
  *
  * The margin is expressed as a ratio so it does not depend on corpus size.
  */
-const CONFIDENCE_MARGIN = 1.5;
-function lexicalIsConfident(hits: Array<{ id: number; score: number }>): boolean {
+function lexicalIsConfident(hits: Array<{ id: number; score: number }>, margin: number): boolean {
   const top = hits[0];
   const next = hits[1];
   if (!top) return false;
   if (!next) return true;
-  return Math.abs(top.score) >= Math.abs(next.score) * CONFIDENCE_MARGIN;
+  return Math.abs(top.score) >= Math.abs(next.score) * margin;
 }
+
+/**
+ * Margins swept, rather than one chosen.
+ *
+ * Run 4 recommended the confidence router on the strength of a single margin —
+ * 1.5, which was invented, never tuned, and would have become load-bearing for an
+ * ADR amendment. This project has twice caught a result resting on a number
+ * nobody measured, and shipping a third would be a pattern rather than an
+ * accident.
+ *
+ * A sweep answers the question that matters more than the winner's score: is the
+ * router a real mechanism, or one lucky constant? A flat curve across margins
+ * means the signal is robust and the exact value does not matter. A spike at one
+ * value means the opposite, and the recommendation should not be made.
+ */
+const MARGINS = [1.05, 1.2, 1.5, 2, 3, 5];
+/** The margin whose numbers are quoted when a single figure is needed. */
+const REFERENCE_MARGIN = 1.5;
 
 type Lists = {
   lex: Array<{ id: number; score: number }>;
@@ -266,14 +296,20 @@ const STRATEGIES: Record<string, (l: Lists, q: string) => number[]> = {
   'rrf-staged': (l) => rrf([rrf([ids(l.lex), ids(l.tri)]), l.vec]),
   'router-shape': (l, q) => (looksExact(q) ? rrf([rrf([ids(l.lex), ids(l.tri)]), l.vec]) : l.vec),
   'router-confidence': (l) =>
-    lexicalIsConfident(l.lex) ? rrf([ids(l.lex), l.vec], [1, 1]) : l.vec,
+    lexicalIsConfident(l.lex, REFERENCE_MARGIN) ? rrf([ids(l.lex), l.vec], [1, 1]) : l.vec,
   // The router that consults the index *and* respects the query shape: use
   // lexical only where it is both plausible and confident.
   'router-both': (l, q) =>
-    looksExact(q) && lexicalIsConfident(l.lex) ? rrf([ids(l.lex), l.vec], [1, 1]) : l.vec,
+    looksExact(q) && lexicalIsConfident(l.lex, REFERENCE_MARGIN)
+      ? rrf([ids(l.lex), l.vec], [1, 1])
+      : l.vec,
 };
 for (const w of WEIGHTS) {
   STRATEGIES[`rrf-weighted-${w}`] = (l) => rrf([rrf([ids(l.lex), ids(l.tri)]), l.vec], [w, 1]);
+}
+for (const m of MARGINS) {
+  STRATEGIES[`router-conf-m${m}`] = (l) =>
+    lexicalIsConfident(l.lex, m) ? rrf([ids(l.lex), l.vec], [1, 1]) : l.vec;
 }
 
 // ---------------------------------------------------------------------------
