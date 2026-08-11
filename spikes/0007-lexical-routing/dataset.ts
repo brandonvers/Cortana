@@ -327,27 +327,113 @@ export const DATASET: Dataset = {
  *
  * Generation is deterministic: same scale, same corpus, same result.
  */
+const MONTHS = [
+  'január',
+  'február',
+  'március',
+  'április',
+  'május',
+  'június',
+  'július',
+  'augusztus',
+  'szeptember',
+  'október',
+  'november',
+  'december',
+];
+
 export function distractors(count: number): Item[] {
   const out: Item[] = [];
-  const templates = [
-    (n: number) =>
-      `Számla kiállítva Kovács Autósbolt részére, sorszám 2026/${String(1000 + n).padStart(4, '0')}, összeg ${100 + (n % 90)} 400 Ft, fizetési határidő nyolc nap.`,
-    (n: number) =>
-      `Munkalap: fékbetét- és féktárcsacsere, a jármű rendszáma ${String.fromCharCode(65 + (n % 26))}${String.fromCharCode(65 + ((n * 7) % 26))}${String.fromCharCode(65 + ((n * 13) % 26))}-${String(100 + (n % 900))}, a munka becsült ideje két óra.`,
-    (n: number) =>
-      `Alkatrész megrendelve, cikkszám 11-42-7-${String(500000 + n * 7)}, szűrő, három darab, szállítás jövő kedden.`,
-    (n: number) =>
-      `Utalás beérkezett a céges számlára, közlemény SZLA-2026-${String(2000 + n).padStart(4, '0')}, összeg ${50 + (n % 40)} 000 Ft.`,
-    (n: number) =>
-      `Garanciajegy kiadva, azonosító GJ-${String(80000 + n)}, a javításra hat hónap garancia jár.`,
-    (n: number) =>
-      `Szerviz elvégezve, a kilométeróra állása ${100 + (n % 200)} ${String(100 + (n % 800)).padStart(3, '0')} km, a következő ellenőrzés tizenötezer kilométer múlva.`,
+
+  // Each entry is a real item's sentence with its identifier replaced by %s, so a
+  // distractor is character-for-character identical to the target except for the
+  // one token the query names. This is the whole idea, and run 2 got it wrong:
+  // its distractors were invoices numbered 2026/1000 upward while the targets
+  // were 2026/0847 and 2026/0874, so nothing ever crowded a target. Vector search
+  // scored 100% at every corpus size because the corpus never got harder.
+  const shapes: Array<{ text: (s: string) => string; near: (i: number) => string }> = [
+    {
+      text: (s) =>
+        `Számla kiállítva Kovács Autósbolt részére, sorszám ${s}, összeg ${100 + (Number(s.slice(-2)) % 90)} 300 Ft, fizetési határidő nyolc nap.`,
+      // Shares the `2026/0` prefix with both targets, so the whole identifier is
+      // one or two digits away from what the query names.
+      near: (i) => `2026/0${String(800 + i).padStart(3, '0')}`,
+    },
+    {
+      text: (s) =>
+        `Munkalap: fékbetét- és féktárcsacsere, a jármű rendszáma ${s}, a munka becsült ideje két óra.`,
+      near: (i) => `ABC-${String(100 + i).padStart(3, '0')}`,
+    },
+    {
+      text: (s) =>
+        `Alkatrész megrendelve, cikkszám ${s}, szűrő, három darab, szállítás jövő kedden.`,
+      near: (i) => `11-42-7-566-${String(100 + i).padStart(3, '0')}`,
+    },
+    {
+      text: (s) => `Utalás beérkezett a céges számlára, közlemény ${s}, összeg 60 000 Ft.`,
+      near: (i) => `SZLA-2026-0${String(250 + i).padStart(3, '0')}`,
+    },
+    {
+      text: (s) => `Garanciajegy kiadva, azonosító ${s}, a javításra hat hónap garancia jár.`,
+      near: (i) => `GJ-77${String(350 + i).padStart(3, '0')}`,
+    },
+    {
+      text: (s) =>
+        `Szerviz elvégezve, a kilométeróra állása ${s}, a következő ellenőrzés tizenötezer kilométer múlva.`,
+      near: (i) =>
+        `1${40 + Math.floor(i / 10)} ${String(200 + (i % 10) * 100).padStart(3, '0')} km`,
+    },
+    {
+      text: (s) => `Időpont egyeztetve Szabó Péterrel, ${s}, délelőtt tíz óra, a műhelyben.`,
+      near: (i) => `2026. ${MONTHS[i % 12]} ${1 + Math.floor(i / 12)}.`,
+    },
+    {
+      text: (s) =>
+        `Ügyfél elérhetősége rögzítve: Nagy Erika, telefon ${s}, e-mail nagy@example.com.`,
+      near: (i) => `06-30-555-1${String(200 + i).padStart(3, '0')}`,
+    },
   ];
-  for (let i = 0; i < count; i++) {
-    const template = templates[i % templates.length];
-    // Ids start well above the real items so a distractor can never be mistaken
-    // for an expected answer.
-    out.push({ id: 10_000 + i, half: 'exact', text: template?.(i) ?? '' });
+
+  // Real identifiers, so a generated near-miss can never collide with a target
+  // and quietly become a second correct answer.
+  const taken = new Set([
+    '2026/0847',
+    '2026/0874',
+    'ABC-123',
+    'ABC-132',
+    '11-42-7-566-327',
+    '11-42-7-566-372',
+    'SZLA-2026-0311',
+    'SZLA-2026-0113',
+    'GJ-77401',
+    'GJ-77410',
+    '148 200 km',
+    '184 200 km',
+    '2026. szeptember 14.',
+    '2026. szeptember 21.',
+    '06-30-555-1234',
+    '06-30-555-1243',
+  ]);
+
+  // The bound is not decoration. The first version of this loop cycled its
+  // identifiers with a modulo, ran out of unique values, and spun forever — found
+  // by running it, not by reading it.
+  let i = 0;
+  const limit = count * 4 + 100;
+  while (out.length < count && i < limit) {
+    const shape = shapes[i % shapes.length];
+    const identifier = shape?.near(Math.floor(i / shapes.length)) ?? '';
+    i += 1;
+    if (!shape || taken.has(identifier)) continue;
+    taken.add(identifier);
+    // Ids sit well above the real items so a distractor can never be mistaken for
+    // an expected answer.
+    out.push({ id: 10_000 + out.length, half: 'exact', text: shape.text(identifier) });
+  }
+  if (out.length < count) {
+    throw new Error(
+      `distractors(${count}) could only generate ${out.length} unique items — widen the identifier ranges rather than measuring a corpus that is smaller than it claims`,
+    );
   }
   return out;
 }
