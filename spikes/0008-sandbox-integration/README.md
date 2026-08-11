@@ -49,15 +49,23 @@ read.
 
 ### Part A — startup behaviour (no AI usage)
 
-`bwrap` is made unavailable by prepending a directory containing a shim that
-exits non-zero. **Nothing on the system is modified**; the shim lives in a temp
-directory and only this process's `PATH` changes.
+`bwrap` is made unavailable by pointing the supported `sandbox.bwrapPath`
+setting at a shim that exits non-zero. **Nothing on the system is modified**; the
+shim lives in a temp directory and the real binary is never touched.
+
+> **Run 1 did this with `PATH` instead, and measured nothing.** The shim was
+> never called, so "started anyway" said nothing about the gate — it said the
+> experiment had not run. Criterion 2b exists to catch exactly that, and it did.
+> Reading the bundled CLI showed the right lever: `bwrapPath` is consulted before
+> the PATH lookup, so naming the shim removes any question of whether an
+> environment change reaches a spawned subprocess.
 
 | # | Criterion | Expected |
 |---|---|---|
 | 0 | `bwrap` is present on this machine | required, or there is no control |
 | 1 | Sandbox enabled, working `bwrap` → session starts | starts |
 | 2 | **Sandbox enabled, broken `bwrap`, `failIfUnavailable` unset** | **the contradiction — recorded, not predicted** |
+| 2b | **The sandbox is constructed at startup** | the shim runs during `startup()`, or criteria 3-5 have nothing to measure and move to Part B |
 | 3 | Sandbox enabled, broken `bwrap`, `failIfUnavailable: true` | **must fail loudly** |
 | 4 | Sandbox enabled, broken `bwrap`, `failIfUnavailable: false` | must degrade, and **say so** |
 | 5 | The same three via `settings.json` rather than the option | **same behaviour on both paths** |
@@ -77,7 +85,12 @@ option get different security, from the same switch, with no error either way.
 |---|---|---|
 | 6 | Sandbox on: a Bash write outside the working directory | refused |
 | 7 | Sandbox on: `dangerouslyDisableSandbox` with `allowUnsandboxedCommands` unset | **records whether the door is open by default** |
-| 8 | Sandbox on: the same with `allowUnsandboxedCommands: false` | **must be ignored** — the parameter is documented as "completely ignored" |
+| 8 | **`failIfUnavailable: true` with a sandbox that cannot start, at the moment a command needs it** | **the command must not run** |
+
+Criterion 8 moved here from Part A once run 2 showed no sandbox is built at
+startup. A gate documented to "exit with an error at startup" cannot fire at a
+startup that never builds one, so the only place left to test it is where a
+command actually needs the sandbox.
 
 Criterion 8 is the one the design depends on. ADR-0007's quarantine agent is
 supposed to be contained by the OS regardless of what the model asks for. If a
