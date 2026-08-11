@@ -1,0 +1,14 @@
+{
+  "name": "spike-0006-multilingual-retrieval",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway: measures fused lexical+vector retrieval quality across local embedding models, on a language the stemmer does not cover",
+  "scripts": {
+    "start": "node run.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.3",
+    "sqlite-vec": "0.1.9"
+  }
+}
