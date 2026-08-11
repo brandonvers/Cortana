@@ -29,7 +29,7 @@ both.
 | Node.js | 24.19.0 |
 | Claude Code | 2.1.226 |
 | Agent SDK | 0.3.226 |
-| Model | `haiku` |
+| Model | `haiku`, then re-run on `sonnet` |
 
 ## Part B — the OS sandbox primitive
 
@@ -127,6 +127,19 @@ INCONCLUSIVE rather than passing.
   kernel-generated profile, because the upstream default silently removes the OS
   layer.
 
+## Re-run on sonnet
+
+The first run used `haiku`. Repeated on `sonnet` with the same payloads, the
+result was **identical in every cell**: five parseable verdicts, zero escape
+attempts, the same four classifications, and the second lock exercised and held
+with no file created.
+
+That the containment result is model-independent is what the design predicts —
+A2 and A3 depend on the profile having nothing to reach for and on the policy
+callback refusing, neither of which involves the model's judgement. It is
+nonetheless worth having measured rather than assumed, because "the design says
+so" is the kind of reasoning this spike exists to check.
+
 ## What this does **not** prove
 
 Stated plainly, because a security spike that overstates itself is worse than one
@@ -135,8 +148,9 @@ that fails.
 - **Five payloads are not a corpus.** They cover recognisable categories, not the
   space. Injection technique moves, and this needs re-running with new payloads
   rather than being treated as settled.
-- **One model.** The run used the cheapest tier. A different model may classify
-  differently — though A2 and A3 do not depend on classification at all.
+- **Two models, not all models.** `haiku` and `sonnet` agree; `opus` was not run.
+  A2 and A3 do not depend on classification at all, so the risk is confined to
+  A4, which is already advisory.
 - **The primitive, not the integration.** B2 and B3 attacked `bwrap` directly.
   Claude Code's *use* of bubblewrap — its filesystem and network policy
   translation, and whether `allowUnsandboxedCommands` can quietly reopen the

@@ -155,6 +155,13 @@ Writing this report is what noticed. It is now
 [ADR-0015](../adr/0015-structured-output-at-the-model-boundary.md), and the
 turn-budget requirement lives there.
 
+## Re-run on sonnet
+
+Part A is model-independent by construction and reproduced exactly: four kills,
+nothing lost, nothing torn, including the same 38-on-disk-against-37-acknowledged
+result. Part B passed on `sonnet` with the structured payload intact and the bus
+still costing about 1 ms.
+
 ## What it changes
 
 - **Principle 2 holds on both filesystems.** Nothing acknowledged was lost under

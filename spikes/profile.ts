@@ -4,8 +4,10 @@
  * Every spike so far measured a minimal agent: no tools, no setting sources, no
  * session persistence, and a five-word prompt. Those numbers are floors, not
  * forecasts, and two decisions rest on them — ADR-0005's memory economics and
- * ADR-0006's three-second wake budget. A floor is the wrong thing to plan a
- * system against.
+ * ADR-0006's dormancy policy. A floor is the wrong thing to plan a system
+ * against, and this profile is what proved it: the realistic figures did not
+ * merely shift the latency numbers, they changed which criterion was the right
+ * one to apply.
  *
  * So there are two profiles, and the realistic one is the default.
  *
