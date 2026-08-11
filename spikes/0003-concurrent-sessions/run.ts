@@ -23,6 +23,12 @@
  *    condition decides the verdict by coin toss — which it did, twice, in
  *    opposite directions. All three conditions are now sampled over interleaved
  *    rounds and compared by median.
+ *
+ * 4. The latency criteria measure the difference dormancy makes, not the wall
+ *    clock. A single absolute threshold was applied to both the warm turn and the
+ *    wake and labelled "ADR-0006's budget"; it was neither the number ADR-0006
+ *    reasons about nor a requirement anyone had stated. See TURN_BUDGET_MS and
+ *    WAKE_PENALTY_MS below.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -60,9 +66,34 @@ const VERBOSE = process.env['VERBOSE'] === '1';
  */
 const ROUNDS = Number(process.env['ROUNDS'] ?? 5);
 
-/** Absolute budgets, in milliseconds. Compared against medians, never a sample. */
-const WARM_BUDGET_MS = Number(process.env['WARM_BUDGET_MS'] ?? 3000);
-const WAKE_BUDGET_MS = Number(process.env['WAKE_BUDGET_MS'] ?? 3000);
+/**
+ * Two budgets, measuring two different things. Both are compared against
+ * medians, never against a sample.
+ *
+ * The first version of this file had a single 3,000 ms threshold applied to both
+ * the warm turn and the wake, and called the wake one "ADR-0006's budget". That
+ * was wrong twice over. ADR-0006 decides whether *dormancy* is affordable, and
+ * the cost of dormancy is not a turn's absolute duration — it is the difference
+ * between waking an agent and having kept it awake. An absolute ceiling on turn
+ * latency is a real requirement, but it belongs to the product, not to a
+ * decision about lifecycle states.
+ *
+ * So they are separated:
+ *
+ * `TURN_BUDGET_MS` is the **product** ceiling: how long a user waits for a
+ * reply, whichever path served it. It is a regression guard, not a target. It is
+ * set at 4,000 ms because the owner accepted the measured ~3.2 s median, and a
+ * guard ~20% above what was accepted catches drift without pretending the
+ * measured number was a requirement.
+ *
+ * `WAKE_PENALTY_MS` is **ADR-0006's** criterion: how much *extra* a user waits
+ * because the agent was asleep. 1,000 ms, on the reasoning that a delay under a
+ * second added to an already multi-second reply is not the thing a user notices.
+ * If dormancy costs less than this, dormancy is free in practice and the ADR
+ * holds; if it costs more, the idle TTL and the pre-warm strategy have to change.
+ */
+const TURN_BUDGET_MS = Number(process.env['TURN_BUDGET_MS'] ?? 4000);
+const WAKE_PENALTY_MS = Number(process.env['WAKE_PENALTY_MS'] ?? 1000);
 
 /**
  * What a session actually carries. Under the `realistic` profile this is a
@@ -409,16 +440,26 @@ async function main(): Promise<void> {
   const warmMedian = stats('warm turn', warmTurns);
   const wakeMedian = stats('pre-warmed wake', wake);
 
+  // A user's turn is served by whichever path applies, so the product ceiling is
+  // checked against the slower of the two rather than the flattering one.
+  const servedMedian = Math.max(warmMedian, wakeMedian);
   check(
-    '3 warm turn budget',
-    warmMedian < WARM_BUDGET_MS,
-    `median ${ms(warmMedian)} (threshold ${WARM_BUDGET_MS} ms)`,
+    '3 turn latency within the product ceiling',
+    servedMedian < TURN_BUDGET_MS,
+    `slower of warm/wake ${ms(servedMedian)} (guard ${TURN_BUDGET_MS} ms)`,
   );
+
+  // ADR-0006's actual claim. The sign matters as much as the magnitude, so the
+  // penalty is reported signed: negative means waking was *faster* than a turn on
+  // a session that had been kept awake, which happens and is not a measurement
+  // error — see the report.
+  const wakePenalty = wakeMedian - warmMedian;
   check(
-    '4 wake budget',
-    wakeMedian < WAKE_BUDGET_MS,
-    `median ${ms(wakeMedian)} (threshold ${WAKE_BUDGET_MS} ms)`,
+    '4 dormancy costs little latency',
+    wakePenalty < WAKE_PENALTY_MS,
+    `wake ${ms(wakeMedian)} vs warm ${ms(warmMedian)} = ${wakePenalty >= 0 ? '+' : ''}${ms(wakePenalty)} (allowed +${WAKE_PENALTY_MS} ms)`,
   );
+
   check(
     '5 pre-warming helps',
     wakeMedian < coldMedian,

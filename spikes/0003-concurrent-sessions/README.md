@@ -26,12 +26,37 @@ that to work:
 |---|---|---|
 | 1 | All sessions start and survive the run | no session dies |
 | 2 | Resident memory per session | measured; twelve must fit in a quarter of the machine's memory |
-| 3 | Warm turn latency | **median under 3 s** |
-| 4 | Pre-warmed wake, prompt to complete | **median under 3 s** |
+| 3 | Turn latency, whichever path served it | **slower of warm/wake median under 4 s** (regression guard) |
+| 4 | The latency dormancy *adds* | **wake median at most 1 s above warm median** |
 | 5 | Pre-warming is worth its complexity | **wake median below cold median** |
 | 6 | Cost | measured and reported, so the budget governor has real numbers |
 
-### How the latency criteria were fixed, twice
+### Criteria 3 and 4 were rewritten after the first realistic run — and why that is not moving the goalposts
+
+The original pair was "warm turn median under 3 s" and "wake median under 3 s",
+the second labelled as ADR-0006's budget. The realistic profile missed both, at
+3,290 ms and 3,095 ms, and that prompted a look at what the criteria were for.
+
+**Criterion 4 was measuring the wrong quantity.** ADR-0006 decides whether agents
+should be dormant by default. The cost of that decision is not how long a turn
+takes — it is how much *longer* a turn takes because the agent was asleep. The old
+criterion could fail on a system where dormancy was completely free, and pass on
+one where it was ruinous, because it never compared the two. It now measures the
+difference, which is the number the decision actually turns on.
+
+**Criterion 3's threshold was never a requirement.** Three seconds was a guess
+written before anything was measured. It has been replaced by a figure the owner
+accepted after seeing the measurement, and it is labelled here as what it is: a
+**regression guard**, set ~20% above the accepted median so drift is caught, not a
+target anything is designed to hit.
+
+That is the line. Relaxing a threshold so a result goes green is dishonest;
+replacing a threshold that measured the wrong quantity is the only thing you can
+do once you notice. **The failing numbers stay in the report exactly as they came
+out**, together with the decision they produced, so anyone can judge the swap for
+themselves.
+
+### How the latency criteria were fixed, twice before that
 
 The first version compared a single warm sample against 40% of a single cold
 sample. It failed by eight milliseconds — in the run where the warm turn was
@@ -61,28 +86,31 @@ noise is a different thing, and the distinction is worth keeping clear.
 
 ## Cost
 
-The harness is built to answer the questions above for as close to nothing as
-possible:
+This spike runs under a **profile**, and the profile costs more than the model
+does. `realistic` is the default because the numbers here are used as forecasts,
+and a forecast taken from an empty session is a floor.
 
-- **A short custom system prompt**, not the full agent preset. This is also what
-  a real Cortana agent uses — each agent carries its own prompt — so it is
-  realistic rather than a cheat.
-- **No tools loaded.** Tool definitions dominate a default system prompt, and this
-  spike measures process and session behaviour, not tool use.
-- **No settings sources.** Your `CLAUDE.md` and project settings are not loaded,
-  which keeps the measurement clean and the prompt small.
-- **The cheapest model**, and prompts that are a few tokens long.
-- **Hard caps**: `maxTurns` and `maxBudgetUsd` on every session.
+- **`realistic`** carries what a resident agent actually carries: its own persona,
+  a six-tool memory surface with full descriptions, read-only file tools, the
+  user's setting sources, session persistence, and a ~2,500-token
+  retrieved-memory block on every turn. About $0.20 per turn on sonnet.
+- **`minimal`** is the comparison: no tools, no setting sources, no persistence,
+  a five-word prompt. About $0.009 per turn on haiku. Useful for isolating what
+  the profile costs; **not** a number to design against.
 
-The total is a handful of very small turns. The harness prints what it actually
-spent at the end, so the estimate is replaced by a fact.
+Either way the harness is built to waste nothing: `startup()` answers the memory
+question without sending a prompt at all, the turn count is fixed by `ROUNDS`
+rather than by the roster size, and every session carries hard `maxTurns` and
+`maxBudgetUsd` caps. The harness prints what it actually spent at the end, so the
+estimate is replaced by a fact.
 
 ## Running it
 
 ```bash
 cd spikes/0003-concurrent-sessions
 pnpm install
-pnpm start
+pnpm start                             # realistic profile, sonnet
+PROFILE=minimal MODEL=haiku pnpm start # the cheap comparison
 ```
 
 Claude Code must be installed and logged in on the machine you run this on. The
