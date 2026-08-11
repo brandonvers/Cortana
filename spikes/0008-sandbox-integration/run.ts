@@ -133,12 +133,15 @@ type Attempt = { started: boolean; error: string; shimReached: boolean };
  * a dependency check at startup costs nothing to observe. If the sandbox check
  * happens later, this returns started:true and Part B is where it would show.
  */
-async function tryStartup(sandbox: Record<string, unknown>): Promise<Attempt> {
+async function tryStartup(
+  sandbox: Record<string, unknown>,
+  tools: string[] = [],
+): Promise<Attempt> {
   const options = {
     model: MODEL,
     maxBudgetUsd: budgetCeilingUsd(),
     systemPrompt: 'You are a probe.',
-    tools: [],
+    tools,
     settingSources: [],
     sandbox,
   } as unknown as Options;
@@ -197,6 +200,28 @@ check(
   anyShimReached
     ? 'the bwrap shim ran during startup() — the attempts below tested what they claim'
     : 'the shim never ran, although bwrapPath named it: the sandbox is NOT built at startup, so no startup-time gate exists to hold. Criteria 3-5 move to Part B.',
+);
+
+/**
+ * Distinguishes "the sandbox is never built" from "the sandbox is built lazily".
+ *
+ * The startup probes above pass `tools: []`. With no Bash tool there is nothing
+ * to sandbox, so a session that starts anyway may be behaving perfectly sensibly
+ * rather than skipping a check — and reporting a security defect on that basis
+ * would be the third overclaim in this spike.
+ *
+ * Registering the Bash tool without sending a prompt separates the two: if the
+ * sandbox is constructed when the tool exists, the shim runs here; if it is
+ * constructed only when a command is actually issued, it does not, and the
+ * documentation's "at startup" is loose wording rather than a missing gate.
+ */
+clearMarker();
+const withBashTool = await tryStartup({ ...brokenSandbox, failIfUnavailable: true }, ['Bash']);
+observe(
+  '2c with the Bash tool registered, still no prompt',
+  withBashTool.shimReached
+    ? `the sandbox IS built once a tool needs it — and the session ${withBashTool.started ? 'STARTED ANYWAY, so failIfUnavailable did not hold' : 'refused, so the gate held'}`
+    : 'still not built — the sandbox is constructed when a command runs, not when a tool exists. "at startup" in the docs is loose wording, and Part B is the only place the gate can be tested.',
 );
 
 const verdict = (a: Attempt, expectRefusal: boolean): string => {
@@ -463,7 +488,9 @@ console.log(
     ? `  VERDICT: PASS — all ${results.length} criteria met`
     : `  VERDICT: FAIL — ${failed.length} of ${results.length} criteria not met`,
 );
-console.log('  The system was not modified; the bwrap shim lived only in this process PATH.');
+console.log(
+  '  The system was not modified: the shim was named via sandbox.bwrapPath and lives in a temp dir.',
+);
 
 rmSync(shimDir, { recursive: true, force: true });
 rmSync(projectDir, { recursive: true, force: true });
