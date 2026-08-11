@@ -252,12 +252,23 @@ if (missing.length > 0) {
   console.log('\n  Missing. Pull them, then re-run:');
   for (const c of missing) console.log(`    ollama pull ${c.model}`);
 }
+// Two models are required for a comparison, which is what an unnarrowed run is.
+// A run narrowed with MODELS= is asking a different question — usually about one
+// model's latency — and refusing it there was a rule applied past its purpose.
+// The random control is always present, so there is never nothing to read against.
+const NARROWED = Boolean(SELECTED?.length);
 check(
   '2 candidate models available',
-  runnable.length >= 2,
-  `${runnable.length} of ${candidates.length} present (a comparison needs at least two)`,
+  runnable.length >= (NARROWED ? 1 : 2),
+  NARROWED
+    ? `${runnable.length} of ${candidates.length} selected via MODELS= (narrowed run: comparison criteria are not decisive)`
+    : `${runnable.length} of ${candidates.length} present (a comparison needs at least two)`,
 );
-if (runnable.length < 2) process.exit(1);
+if (runnable.length < (NARROWED ? 1 : 2)) process.exit(1);
+if (NARROWED) {
+  console.log('  NOTE: MODELS= is set. This run measures the selected model(s); it cannot');
+  console.log('        choose a default, and criteria 5-7 should be read as informational.');
+}
 
 // ---------------------------------------------------------------------------
 section('lexical indexes');
