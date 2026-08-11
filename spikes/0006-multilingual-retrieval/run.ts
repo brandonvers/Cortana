@@ -540,7 +540,7 @@ section('comparison');
 const control = modelResults.find((r) => r.model === RANDOM_CONTROL);
 modelResults.sort((a, b) => b.fused.mrr - a.fused.mrr);
 console.log(
-  '  model                       dims  vec@5  flat@5  STAGED@5   MRR    hu@5    en@5    gap   trunc@5  embed p95',
+  '  model                       dims  vec@5  flat@5  STAGED@5   MRR    hu@5    en@5    gap   trunc@5   embed p50/p95',
 );
 for (const r of modelResults) {
   const hu = r.byLang.get('hu');
@@ -548,7 +548,7 @@ for (const r of modelResults) {
   const gap = hu && en ? en.r5 - hu.r5 : Number.NaN;
   const trunc = r.byMechanism.get('truncation');
   console.log(
-    `  ${r.model.padEnd(26)} ${String(r.dims).padStart(4)}  ${pct(r.vector.r5).padStart(6)}  ${pct(r.flat.r5).padStart(6)}  ${pct(r.fused.r5).padStart(7)}  ${r.fused.mrr.toFixed(3)}  ${(hu ? pct(hu.r5) : '—').padStart(6)}  ${(en ? pct(en.r5) : '—').padStart(6)}  ${(Number.isFinite(gap) ? pct(gap) : '—').padStart(6)}  ${(trunc ? pct(trunc.r5) : '—').padStart(7)}  ${r.embedMsP95.toFixed(0).padStart(5)} ms`,
+    `  ${r.model.padEnd(26)} ${String(r.dims).padStart(4)}  ${pct(r.vector.r5).padStart(6)}  ${pct(r.flat.r5).padStart(6)}  ${pct(r.fused.r5).padStart(7)}  ${r.fused.mrr.toFixed(3)}  ${(hu ? pct(hu.r5) : '—').padStart(6)}  ${(en ? pct(en.r5) : '—').padStart(6)}  ${(Number.isFinite(gap) ? pct(gap) : '—').padStart(6)}  ${(trunc ? pct(trunc.r5) : '—').padStart(7)}  ${`${r.embedMsP50.toFixed(0)}/${r.embedMsP95.toFixed(0)}`.padStart(9)} ms`,
   );
 }
 console.log(`  ${'lexical alone (no model)'.padEnd(26)}    —  ${pct(lexicalOnly.r5).padStart(6)}`);
@@ -667,11 +667,21 @@ check(
   `english minus hungarian recall@5 = ${pct(bestGap)} (threshold 15 points)`,
 );
 
-// Every memory write pays this, so it is a design constraint, not a curiosity.
+// Named for the query path, because that is what this actually measures: one
+// embed per question, on the critical path, added to whatever the turn already
+// costs. The first version called it "per memory write" and pointed at the
+// cheaper half — writes are batched and can run in the background, where the
+// same milliseconds are free. The `index time` line above is the write path.
+//
+// p50 is printed beside p95 for a reason. A run where both are high says the
+// model costs that much; a run where p50 is low and p95 is not says the tail is
+// something else — scheduling, a model reload — and no faster hardware fixes it.
 check(
-  '8 embedding latency is affordable per memory write',
+  '8 query-path embedding latency is affordable',
   (best?.embedMsP95 ?? Number.POSITIVE_INFINITY) < 500,
-  best ? `${best.model} p95 ${best.embedMsP95.toFixed(0)} ms (threshold 500 ms)` : 'n/a',
+  best
+    ? `${best.model} p50 ${best.embedMsP50.toFixed(0)} ms, p95 ${best.embedMsP95.toFixed(0)} ms (threshold 500 ms on p95)`
+    : 'n/a',
 );
 
 // A model whose context window is shorter than the item silently embeds the

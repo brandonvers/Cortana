@@ -320,11 +320,45 @@ lands in the table, and says so out loud when it scores highest.
 This is a decision on the public set. The private set of real material can
 overturn it, and if it does, the private number wins.
 
+## Why every number here is a CPU number
+
+The host has a Quadro P620 and Ollama refused it:
+
+```text
+level=WARN source=cuda_compat.go:70 msg="NVIDIA driver too old"
+  device="Quadro P620" compute=6.1 driver=550 required_driver="570 or newer"
+```
+
+Everything else on that machine is configured correctly — container toolkit 1.19.1
+installed, the card visible inside the container, the compose file reserving it.
+The driver is the only blocker.
+
+**Fixing it is narrower than it looks, and may not be worth doing.** Driver
+branches 570 and 580 support Pascal; **590 dropped it**, so "install the latest"
+would remove this card's support entirely — the one case so far where this
+project's standing rule to take the newest version is the wrong move. 580 is the
+last branch, supported on Quadro until October 2028.
+
+And the gain is uncertain in direction, not only in size. The P620 has roughly
+40 GB/s of memory bandwidth against a dual-socket Xeon's quad-channel DDR3; for a
+567M-parameter model on short inputs the bottleneck is bandwidth, so the card may
+be **slower** than the 48 threads it would replace. Its 2 GB of VRAM fits
+`bge-m3`'s 1.2 GB with little to spare.
+
+The decision was to **not upgrade the driver yet**, and to find out what the 677 ms
+is made of first — a p50 near p95 means the model genuinely costs that much, while
+a low p50 with a high p95 means the tail is scheduling or a model reload and no
+hardware change touches it. The harness printed only p95, which is the defect that
+hid the distinction; it now prints both.
+
+Criterion 8 was also misnamed. It read "affordable per memory **write**", but the
+harness measures one embed per **query**, on the critical path. Writes are batched
+— that is the `index time` line — and can run in the background, where the same
+milliseconds cost nothing. The threshold was attached to the cheaper half.
+
 ## What this does **not** establish
 
-- **Nothing about latency as deployed.** Ollama ran on the CPU for both runs, so
-  criterion 8's failure at 677 ms is a measurement of a 48-core Xeon. The GPU
-  question is open.
+- **Nothing about latency on a GPU**, for the reasons above.
 - **Nothing about scale.** Forty-one items, so recall@5 is the top 12% of the
   corpus — an easy target. Real memory holds thousands, where lexical precision
   matters more than it can here, and **the fusion finding may not survive it**:
