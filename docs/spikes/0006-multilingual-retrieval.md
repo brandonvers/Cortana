@@ -345,11 +345,40 @@ And the gain is uncertain in direction, not only in size. The P620 has roughly
 be **slower** than the 48 threads it would replace. Its 2 GB of VRAM fits
 `bge-m3`'s 1.2 GB with little to spare.
 
-The decision was to **not upgrade the driver yet**, and to find out what the 677 ms
-is made of first — a p50 near p95 means the model genuinely costs that much, while
-a low p50 with a high p95 means the tail is scheduling or a model reload and no
-hardware change touches it. The harness printed only p95, which is the defect that
-hid the distinction; it now prints both.
+The harness printed only p95, which hid the one distinction that decides whether
+hardware is the lever at all. It now prints both, and a targeted re-run answered
+it:
+
+```text
+bge-m3   embed p50 621 ms / p95 670 ms
+```
+
+**Flat. No tail.** The model genuinely costs ~620 ms per query on this CPU, so
+model reloading and scheduling are not the explanation and `keep_alive` would
+change nothing.
+
+That also **corrects an earlier claim in this report's own draft**, which guessed
+the P620 might be slower than the CPU on bandwidth grounds. The measurement says
+otherwise: `bge-m3` is 1.13 GB at F16, and a dual-socket Xeon has enough bandwidth
+to stream that in roughly 25 ms. Taking 620 ms means the work is **compute-bound,
+not bandwidth-bound** — and on compute the P620's ~1.3 TFLOPS against what these
+Xeons realistically achieve is a genuine advantage. A driver upgrade to 580 could
+plausibly be worth several times, not nothing.
+
+Quantisation would have been the cheaper lever, and it is not available: every
+`bge-m3` tag on Ollama is the same 1.2 GB F16 build.
+
+**The driver decision is nevertheless deferred, because criterion 8 encodes an
+undeclared assumption.** Its 500 ms threshold only means something if the query
+embedding is *serial* with the turn. Spike 0003 measured a wake at ~3 s; if
+retrieval runs concurrently with waking the agent and assembling its context, the
+620 ms disappears entirely and no hardware change is needed. If it is serial, it
+is 19% on top of every turn and the driver matters.
+
+**Which of those is true has never been decided**, so the threshold is neither met
+nor meaningful yet. That is recorded as an open architecture question rather than
+quietly relaxed — moving this threshold after seeing a red number is exactly the
+move refused twice already in this project.
 
 Criterion 8 was also misnamed. It read "affordable per memory **write**", but the
 harness measures one embed per **query**, on the critical path. Writes are batched
