@@ -283,6 +283,22 @@ credentials, and no way out.
 - **Two layers, always.** Every security property is enforced by the policy
   engine *and* by an OS-level sandbox. Tool allowlists in frontmatter are
   ergonomics, never a boundary.
+- **Generated profiles set `sandbox.allowUnsandboxedCommands: false`**, alongside
+  `failIfUnavailable: true`.
+
+  At the documented default (`true`), a model-supplied `dangerouslyDisableSandbox:
+  true` takes a Bash command out of the sandbox — which makes the OS layer
+  *model-discretionary* and leaves the policy engine as sole adjudicator on
+  exactly the commands the sandbox had refused.
+  [Spike 0008](spikes/0008-sandbox-integration.md) observed a model emitting that
+  parameter without being asked to, with the write landing when the permission
+  callback allowed the call.
+
+  **Adopted on the setting's documented semantics, not on a measurement.** Spike
+  0008 did not verify it is enforced, and exercised it on no path other than the
+  SDK `sandbox` option. Both settings must be asserted at runtime against pinned
+  CLI and SDK versions rather than assumed — and see that report for why "two
+  layers" does not currently hold for tools other than Bash.
 - **Secrets never enter model context.** Encrypted at rest, scrubbed from
   subprocess environments.
 - **Real-world actions need approval.** Sending mail, publishing, spending —

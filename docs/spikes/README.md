@@ -13,6 +13,7 @@ designed around. A spike is a throwaway script with a pass criterion written dow
 | [0005](0005-durable-bus.md) | Does an acknowledged write survive SIGKILL, and do the delivery rules work against a real store? | ✅ Pass on both filesystems — nothing acknowledged was ever lost |
 | [0006](0006-multilingual-retrieval.md) | Does retrieval work in a language the stemmer does not cover, and which embedding model should be the default? | ⚠️ `bge-m3` chosen on measurement — but **fusion failed**: the lexical indexes make the best model worse |
 | [0007](0007-lexical-routing.md) | Is the lexical index a specialist or an unconditional voter? | ❌ **Failed its own pre-registered criterion and answers nothing.** Kept as the record of what a fifth attempt would need |
+| [0008](0008-sandbox-integration.md) | Does Claude Code's *use* of the sandbox hold, and does it fail loudly? | ⚠️ **One finding; the rest struck.** `bwrapPath` was supplied on a channel documented to ignore it, so the substitution never took effect |
 
 ## Rules
 
@@ -42,5 +43,6 @@ The spikes that must complete before implementation begins, in order:
 | Retrieval quality on the **private** set of real material | [0006](0006-multilingual-retrieval.md) chose `bge-m3` on a set whose queries were written alongside its items. Real material can overturn it, and if it does, it wins |
 | Does the lexical index earn its place as a **specialist** rather than a voter? | **Still open after [0007](0007-lexical-routing.md) failed to answer it.** The fusion rule in [CONCEPTS §8](../CONCEPTS.md) is now marked open with evidence against one form of it and none for the specified form. 0007's closing section lists what the measurement needs — it is a benchmark, not a spike |
 | Is structured model output enforced or best-effort? | Decides how much re-validation the kernel needs at the model boundary |
-| Claude Code's *use* of the sandbox, as opposed to bubblewrap itself | [0004](0004-containment.md) proved the primitive contains; the policy translation above it is untested |
+| Does the sandbox constrain **non-Bash** tools? | [0008](0008-sandbox-integration.md) verified "enforced twice" for shell commands only — and the quarantine agent has no shell. The OS leg of ADR-0007 is unverified for the profile it governs |
+| Does `failIfUnavailable: true` change any outcome? | A project requirement since [0004](0004-containment.md), never once observed doing anything, across two spikes. [0008](0008-sandbox-integration.md) explains what a working attempt needs: `bwrapPath` via `managedSettings`, exercised when a command runs |
 | Provider usage-limit behaviour under load | The budget governor cannot be designed against a guess |

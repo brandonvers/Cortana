@@ -2,6 +2,18 @@
  * Spike 0008 — does Claude Code's *use* of the sandbox hold, and does it fail
  * loudly when it cannot?
  *
+ * ⚠️ **PART A'S OUTPUT IS NOT EVIDENCE.** Every startup criterion substitutes
+ * bubblewrap by setting `sandbox.bwrapPath`, which the SDK typings document as
+ * "Only honored from admin-controlled managed settings" — and these probes pass
+ * it through the SDK `sandbox` option. The value is dropped, the real
+ * /usr/bin/bwrap runs, and the shim is never named to anything. Criteria 2b, 2c,
+ * 3, 4, 5, 5b and 8 are harness defects, not findings about Claude Code. See
+ * docs/spikes/0008-sandbox-integration.md before quoting any of it.
+ *
+ * What survived: criterion 6. A model-set `dangerouslyDisableSandbox: true` took
+ * a Bash command out of the sandbox and the write landed, under the documented
+ * default `allowUnsandboxedCommands: true`.
+ *
  * Throwaway. See README.md for the pass criteria, written down before this ran.
  *
  * Part A consumes no AI usage: `startup()` initialises a session without sending
