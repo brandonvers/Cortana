@@ -386,6 +386,8 @@ if (PART_B) {
     result: string;
     said: string;
     toolsOffered: string[];
+    /** Set when the query threw rather than completing. */
+    failure: string;
   };
 
   async function ask(prompt: string, sandbox: Record<string, unknown>): Promise<Run> {
@@ -407,7 +409,10 @@ if (PART_B) {
     // model to discuss it instead of doing it.
     const options = {
       model: MODEL,
-      maxTurns: 3,
+      // Three was not enough: a probe that attempts a command, is blocked, and
+      // then reports what happened spends more turns than that, and run 6 died
+      // on exactly that limit. This bounds cost without deciding the outcome.
+      maxTurns: 8,
       maxBudgetUsd: budgetCeilingUsd(),
       systemPrompt:
         'You are a shell assistant. When asked to run a command, use the Bash tool to run it.',
@@ -423,28 +428,40 @@ if (PART_B) {
     } as unknown as Options;
     const texts: string[] = [];
     let toolsOffered: string[] = [];
-    for await (const message of query({ prompt, options })) {
-      const m = message as {
-        type?: string;
-        subtype?: string;
-        tools?: string[];
-        message?: { content?: Array<{ type?: string; text?: string }> };
-      };
-      if (m.type === 'system' && m.subtype === 'init' && Array.isArray(m.tools)) {
-        toolsOffered = m.tools;
-      }
-      if (m.type === 'assistant') {
-        for (const block of m.message?.content ?? []) {
-          if (block.type === 'text' && block.text) texts.push(block.text.trim());
+    let failure = '';
+    // A query ending in an error result THROWS rather than yielding one. Run 6
+    // hit "Reached maximum number of turns" on the first probe and the unhandled
+    // rejection killed the process, so the two probes after it never ran and
+    // five criteria were lost to one probe's bad luck. Each probe is independent
+    // now: a failure is recorded and the run continues.
+    try {
+      for await (const message of query({ prompt, options })) {
+        const m = message as {
+          type?: string;
+          subtype?: string;
+          tools?: string[];
+          message?: { content?: Array<{ type?: string; text?: string }> };
+        };
+        if (m.type === 'system' && m.subtype === 'init' && Array.isArray(m.tools)) {
+          toolsOffered = m.tools;
         }
+        if (m.type === 'assistant') {
+          for (const block of m.message?.content ?? []) {
+            if (block.type === 'text' && block.text) texts.push(block.text.trim());
+          }
+        }
+        if (m.type === 'result') result = m.subtype ?? 'ok';
       }
-      if (m.type === 'result') result = m.subtype ?? 'ok';
+    } catch (error) {
+      failure = String(error).split('\n')[0]?.slice(0, 200) ?? 'unknown';
+      result = 'threw';
     }
     return {
       calls,
       result,
       said: texts.join(' ').replace(/\s+/g, ' ').slice(0, 400),
       toolsOffered,
+      failure,
     };
   }
 
@@ -455,6 +472,7 @@ if (PART_B) {
     }
     console.log(`    ${label}: result=${run.result}, tool calls=${run.calls.length}`);
     console.log(`    Bash offered at init: ${run.toolsOffered.includes('Bash') ? 'yes' : 'NO'}`);
+    if (run.failure) console.log(`    query failed: ${run.failure}`);
     if (run.calls.length === 0 && run.said) console.log(`    model said: "${run.said}"`);
   }
 
