@@ -183,6 +183,8 @@ type Outcome = {
   costUsd: number;
   modelCalls: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   durationMs: number;
   failure: string;
 };
@@ -207,6 +209,8 @@ async function runCase(c: Case, model: string, maxTurns: number): Promise<Outcom
     costUsd: 0,
     modelCalls: 0,
     outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     durationMs: 0,
     failure: '',
   };
@@ -232,7 +236,14 @@ async function runCase(c: Case, model: string, maxTurns: number): Promise<Outcom
         terminal_reason?: string;
         structured_output?: unknown;
         total_cost_usd?: number;
-        modelUsage?: Record<string, { outputTokens?: number; webSearchRequests?: number }>;
+        modelUsage?: Record<
+          string,
+          {
+            outputTokens?: number;
+            cacheReadInputTokens?: number;
+            cacheCreationInputTokens?: number;
+          }
+        >;
         message?: { content?: Array<{ type?: string; text?: string }> };
       };
       if (m.type === 'assistant') {
@@ -248,7 +259,15 @@ async function runCase(c: Case, model: string, maxTurns: number): Promise<Outcom
         out.costUsd = m.total_cost_usd ?? 0;
         const usage = m.modelUsage ?? {};
         out.modelCalls = Object.keys(usage).length;
-        out.outputTokens = Object.values(usage).reduce((s, u) => s + (u.outputTokens ?? 0), 0);
+        const sum = (f: (u: Record<string, number | undefined>) => number | undefined) =>
+          Object.values(usage).reduce((s, u) => s + (f(u) ?? 0), 0);
+        out.outputTokens = sum((u) => u['outputTokens']);
+        // The pair that decides whether a cost spread is retries or cache state.
+        // Retries would raise output tokens; a cold prompt cache raises the write
+        // count instead. Run 1 vs run 2 of `deep-nesting` differed 32x in cost on
+        // 1.2x the output tokens, which is what prompted capturing these.
+        out.cacheReadTokens = sum((u) => u['cacheReadInputTokens']);
+        out.cacheWriteTokens = sum((u) => u['cacheCreationInputTokens']);
       }
     }
   } catch (error) {
@@ -264,7 +283,9 @@ function describe(o: Outcome): void {
   console.log(
     `    ${o.key.padEnd(17)} ${o.model.padEnd(7)} subtype=${o.subtype.padEnd(34)} structured=${o.hasStructured ? 'yes' : 'NO '} $${o.costUsd.toFixed(4)} ${o.outputTokens} out-tok ${(o.durationMs / 1000).toFixed(1)}s`,
   );
-  if (o.terminalReason) console.log(`      terminal_reason: ${o.terminalReason}`);
+  console.log(
+    `      cache: ${o.cacheWriteTokens} written, ${o.cacheReadTokens} read${o.terminalReason ? ` · terminal_reason: ${o.terminalReason}` : ''}`,
+  );
   if (o.failure) console.log(`      threw: ${o.failure}`);
   if (o.hasStructured) {
     console.log(`      structured: ${JSON.stringify(o.structured).slice(0, 260)}`);
@@ -282,6 +303,19 @@ for (const c of CASES) {
   outcomes.push(o);
   describe(o);
 }
+
+// The same expensive case immediately again, unchanged.
+//
+// Two runs of `deep-nesting` cost $0.0212 and $0.6833 — 32x apart on 1.2x the
+// output tokens. Output tokens rule out silent retries as the cause; repeating
+// the identical case back to back separates the two remaining candidates. If the
+// repeat is much cheaper and writes little cache, the spread is prompt-cache
+// state, which spike 0003 already measured at 19x. If it costs the same, it is
+// not cache and the question is still open.
+console.log('\n  deep-nesting (repeat) — the identical case, immediately again');
+const repeat = await runCase(CASES[CASES.length - 1] as Case, MODEL, 3);
+repeat.key = 'deep-nesting-repeat';
+describe(repeat);
 
 const by = (key: string): Outcome | undefined => outcomes.find((o) => o.key === key);
 const easy = by('easy');
@@ -334,16 +368,26 @@ if (retryExhausted.length > 0) {
 }
 
 // The hypothesis about ADR-0015's unexplained 70x cost spread: silent retries.
-const hardest = hardCases.reduce<Outcome | undefined>(
-  (worst, o) => (!worst || o.costUsd > worst.costUsd ? o : worst),
-  undefined,
-);
-if (easy && hardest) {
-  const ratio = easy.costUsd > 0 ? hardest.costUsd / easy.costUsd : Number.NaN;
+const deep = by('deep-nesting');
+if (deep) {
+  const costRatio = repeat.costUsd > 0 ? deep.costUsd / repeat.costUsd : Number.NaN;
+  const tokenRatio = repeat.outputTokens > 0 ? deep.outputTokens / repeat.outputTokens : Number.NaN;
   observe(
-    '4 does a hard schema cost more than an easy one',
-    `easy $${easy.costUsd.toFixed(4)} (${easy.outputTokens} out-tok) vs ${hardest.key} $${hardest.costUsd.toFixed(4)} (${hardest.outputTokens} out-tok) = ${Number.isFinite(ratio) ? `${ratio.toFixed(1)}×` : 'n/a'}. ADR-0015 recorded an unexplained 70× spread on one model; a large ratio here supports silent retries as the cause, a small one does not.`,
+    '4 what explains ADR-0015’s cost spread',
+    `first $${deep.costUsd.toFixed(4)} (${deep.outputTokens} out-tok, ${deep.cacheWriteTokens} cache written) vs repeat $${repeat.costUsd.toFixed(4)} (${repeat.outputTokens} out-tok, ${repeat.cacheWriteTokens} cache written): cost ${Number.isFinite(costRatio) ? `${costRatio.toFixed(1)}×` : 'n/a'} on ${Number.isFinite(tokenRatio) ? `${tokenRatio.toFixed(1)}×` : 'n/a'} the output tokens. Cost moving without output tokens moving rules out silent retries; cache writes moving with it points at prompt-cache state.`,
   );
+}
+if (easy) {
+  const hardest = hardCases.reduce<Outcome | undefined>(
+    (worst, o) => (!worst || o.costUsd > worst.costUsd ? o : worst),
+    undefined,
+  );
+  if (hardest) {
+    observe(
+      '4b schema difficulty against cost, within one run',
+      `easy $${easy.costUsd.toFixed(4)} / ${easy.outputTokens} out-tok vs ${hardest.key} $${hardest.costUsd.toFixed(4)} / ${hardest.outputTokens} out-tok — the honest comparison is within a run, since between runs the cache dominates`,
+    );
+  }
 }
 
 // The one with consequences for the kernel: schema-valid and false.
@@ -378,9 +422,10 @@ if (WITH_OPUS) {
 
 // ---------------------------------------------------------------------------
 section('cost');
-const spent = outcomes.reduce((s, o) => s + o.costUsd, 0);
-console.log(`  total           $${spent.toFixed(4)} across ${outcomes.length} case(s)`);
-for (const o of outcomes) {
+const allRuns = [...outcomes, repeat];
+const spent = allRuns.reduce((s, o) => s + o.costUsd, 0);
+console.log(`  total           $${spent.toFixed(4)} across ${allRuns.length} case(s)`);
+for (const o of allRuns) {
   console.log(`    ${o.key.padEnd(17)} $${o.costUsd.toFixed(4)}`);
 }
 section('summary');
