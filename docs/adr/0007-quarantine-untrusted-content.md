@@ -61,6 +61,24 @@ a working session by another route.
   standing rule, its restrictions are enforced by the policy engine **and** by
   the OS sandbox, never by the agent's tool list alone.
 
+> **Correction — [spike 0008](../spikes/0008-sandbox-integration.md), 2026-08-12.**
+> Claude Code 2.1.226 / Agent SDK 0.3.226, Debian 13, sonnet.
+>
+> The sentence above is verified **for spawned shell commands only**, and at that
+> boundary the two layers turn out to be alternatives rather than a stack: a
+> *sandboxed* command needs no permission decision, so the policy callback is
+> never consulted, and an *unsandboxed* one is adjudicated by policy alone.
+>
+> Whether `sandbox.enabled` constrains any **non-Bash** tool — Read, Write, Edit,
+> WebFetch, MCP dispatch, everything in-process — is unmeasured. **The quarantine
+> agent has no Bash tool**, so for the profile this ADR governs, the OS leg of
+> "enforced twice" is currently **unverified**, not confirmed.
+>
+> Consequence for the design: deny policy must not live solely in `canUseTool`.
+> The spike that tries to escape this profile, already listed below as required
+> before any mail connector ships, must exercise non-Bash tools rather than
+> repeating spike 0004's shell-command tests.
+
 ## Alternatives considered
 
 **One-way downgrade only.** The original design. Rejected as reactive: it accepts
