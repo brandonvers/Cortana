@@ -45,7 +45,21 @@ depends on the model**, which was measured rather than assumed:
 |---|---|---|
 | `haiku` | **fails** — `error_max_turns`, no schema | `thinking \| text` then, on a second turn, `thinking \| tool_use:StructuredOutput` |
 | `sonnet` | **succeeds** | `text \| tool_use:StructuredOutput` in one turn |
-| `opus` | not measured — see the cost note below | — |
+| `opus` | **succeeds** — n=1, trivial prompt | `text \| tool_use:StructuredOutput` in one turn |
+
+> **The rows are observations, not guarantees.** Each was measured against a
+> one-field schema on a trivial prompt, on Claude Code 2.1.226 / Agent SDK
+> 0.3.226. `haiku` and `sonnet` come from
+> [spike 0005](../spikes/0005-durable-bus.md)'s harness, `opus` from
+> [spike 0009](../spikes/0009-structured-output.md) — a different probe, n=1.
+>
+> A **fails** cell is an existence claim and one observation settles it. A
+> **succeeds** cell is a universal claim and one observation does not: it records
+> that the carrier *can* fit in one turn, never that it always will. **No model
+> has been measured at `maxTurns: 1` against a hard schema.** The budget therefore
+> stays carrier-plus-headroom for every model including `opus`; nothing here
+> sanctions a `maxTurns: 1` configuration. The rows name tier aliases, which
+> resolve to snapshots that change underneath this record.
 
 A weaker model answers in prose, ends its turn, and only then converts to the
 schema. A stronger one does both at once.
@@ -73,13 +87,27 @@ Measured in [spike 0005](../spikes/0005-durable-bus.md).
 - **A cost**: on a model that needs a second turn for the carrier, every gated
   decision costs an extra round trip. Accepted — an unparseable decision costs
   more.
-- **A cost worth measuring separately.** Probing this produced turn costs of
-  $0.12–$0.17 on `haiku` and **$0.63 on `sonnet`** for a trivial prompt, against
-  $0.0086 per `haiku` turn measured in
-  [spike 0003](../spikes/0003-concurrent-sessions.md). A 70× spread between two
-  runs on the same model is not something to design a budget governor around
-  until it is understood. It is recorded here as an open question rather than a
-  parameter, and `opus` was deliberately not probed.
+- **A cost spread that is now explained — and it is not structured output's
+  fault.** This ADR previously recorded turn costs of $0.12–$0.17 on `haiku` and
+  $0.63 on `sonnet` as an unexplained "70× spread" and refused to let a budget
+  governor be designed around it. Two corrections, from
+  [spike 0009](../spikes/0009-structured-output.md).
+
+  The 70× compared a `sonnet` figure against a `haiku` baseline. The real
+  same-model spread, measured on one identical call repeated back to back, is
+  **34×** — $0.0201 against $0.6891.
+
+  The cause is **prompt-cache state, not structured output**. The expensive turn
+  wrote 110,428 tokens of cache and the cheap one wrote none, while output tokens
+  differed by 1.4×. Silent structured-output retries would bill as output tokens,
+  so they are ruled out. Three regimes were observed: no cache activity ≈ $0.02,
+  ~107k cache **read** ≈ $0.08, ~110k cache **written** ≈ $0.69.
+
+  **What this hands the budget governor is the variance, not a number.** An
+  identical call costs from two cents to sixty-nine depending on whether that turn
+  writes the context cache, and what selects between the regimes is not known.
+  Small structured calls are unaffected: they show zero cache activity and cost a
+  stable $0.0014–$0.0054, so the schema itself is cheap and predictable.
 - **A constraint on prompts**: a vague instruction makes the model ask for
   clarification instead of answering, which consumes the same budget and produces
   the *same symptom* as the carrier-turn problem. Two distinct causes, identical
@@ -101,7 +129,41 @@ cheap and it is the layer we control.
 with extra steps, and it puts a correctness property in prompt text — which this
 project does not permit anywhere.
 
+## Schema-validity is not truth-validity
+
+Added after [spike 0009](../spikes/0009-structured-output.md), as a design
+principle rather than a measured rate.
+
+The Zod re-validation above checks **shape**, which is what it is for and all it
+can do. A well-typed value that asserts a fact about the world — a source, an
+identifier, a reference, a citation — is checked by nothing yet.
+
+Spike 0009 put four adversarial schemas against `sonnet` and none broke the
+mechanism; in every case **the schema rather than the content decided the
+response**, in both directions. A closed object dropped true facts supplied in the
+prompt in order to fit its single field. A required non-nullable field was filled
+because it could not be left empty.
+
+**The cheap remedy was measured and works: make absence representable.** The same
+prompt and field with `type: ['string','null']` returned `null` where the
+non-nullable version returned a value. So:
+
+- A schema field that can legitimately have no value **must permit null**, and say
+  so in its description. Requiring what the content may not contain is an
+  authoring error, not a model failure.
+- Fields that assert facts about the world need a semantic or provenance check
+  **only where the null option does not suffice**. Which fields those are is
+  unmeasured, and a provenance layer should not be built before one is found.
+
+An earlier draft of that spike claimed the opposite — that models fabricate under
+schema pressure — on the strength of a regex that tested URL *shape* and printed
+the result as a truth verdict. The flagged URL resolved and was on topic. The
+claim was withdrawn before it reached this ADR, and the episode is recorded here
+because the wrong version would have justified building the provenance layer the
+right version says to defer.
+
 ## Revisit when
 
 A measurement shows the carrier turn is a material share of usage in practice, or
-the runner gains a way to return structured data without spending a turn.
+the runner gains a way to return structured data without spending a turn, or a
+field is found where making absence representable is not enough.
