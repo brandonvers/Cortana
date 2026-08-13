@@ -389,7 +389,7 @@ if (deep) {
   const tokenRatio = repeat.outputTokens > 0 ? deep.outputTokens / repeat.outputTokens : Number.NaN;
   observe(
     '4 what explains ADR-0015’s cost spread',
-    `first $${deep.costUsd.toFixed(4)} (${deep.outputTokens} out-tok, ${deep.cacheWriteTokens} cache written) vs repeat $${repeat.costUsd.toFixed(4)} (${repeat.outputTokens} out-tok, ${repeat.cacheWriteTokens} cache written): cost ${Number.isFinite(costRatio) ? `${costRatio.toFixed(1)}×` : 'n/a'} on ${Number.isFinite(tokenRatio) ? `${tokenRatio.toFixed(1)}×` : 'n/a'} the output tokens. Cost moving without output tokens moving rules out silent retries; cache writes moving with it points at prompt-cache state.`,
+    `first $${deep.costUsd.toFixed(4)} (${deep.outputTokens} out-tok, ${deep.cacheWriteTokens} cache written) vs repeat $${repeat.costUsd.toFixed(4)} (${repeat.outputTokens} out-tok, ${repeat.cacheWriteTokens} cache written): ${Number.isFinite(costRatio) ? `${(costRatio >= 1 ? costRatio : 1 / costRatio).toFixed(1)}×` : 'n/a'} apart on cost, ${Number.isFinite(tokenRatio) ? `${(tokenRatio >= 1 ? tokenRatio : 1 / tokenRatio).toFixed(1)}×` : 'n/a'} apart on output tokens. Retries bill as output tokens, so a cost gap without a token gap rules them out; the cache-write column is what moves with the cost.`,
   );
 }
 if (easy) {
