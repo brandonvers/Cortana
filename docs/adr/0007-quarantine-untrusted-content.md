@@ -108,6 +108,39 @@ a working session by another route.
 > Still unmeasured: `WebFetch` and MCP dispatch. The claim above rests on `Read`
 > and `Write`.
 
+<!-- markdownlint-disable-next-line MD028 -->
+
+> **Confirmation — [spike 0011](../spikes/0011-quarantine-escape.md), 2026-08-13.**
+> Claude Code 2.1.229 / Agent SDK 0.3.229, Debian 13, sonnet.
+>
+> "Enforced twice" now holds for in-process tools, measured the way the phrase
+> actually claims: **each layer alone was sufficient**, against a positive
+> control in which the escape succeeded 3/3 with both locks removed. The policy
+> callback alone blocked it 3/3; a deny rule alone blocked it 3/3. Deny rules are
+> evaluated **before** the callback, so the two are independent rather than one
+> lock consulted twice.
+>
+> **The rule form decides whether the second lock exists.** `Read(/abs/path/**)`
+> leaked 4 times out of 4; `Read(//abs/path/**)` held 4 out of 4. A rule in the
+> plain form raises no error and no warning, and a profile carrying one looks
+> protected while being protected by one layer only.
+>
+> **Delegation is not a bypass.** A subagent's tool calls reach the parent's
+> callback, and the parent's deny rules propagate to it. One unreproduced
+> observation runs the other way — a subagent read the file through **Bash**,
+> which never reaches the callback because a sandboxed command needs no
+> permission decision. Recorded as an open risk, not a property.
+>
+> Two environment facts a generated profile must state: it inherits the
+> operator's MCP servers unless `strictMcpConfig` is set with an empty
+> `mcpServers`, and denying a tool by **bare name** removes it from the session —
+> the allowlist layer this ADR refuses to treat as a boundary — rather than
+> refusing the call.
+>
+> This closes the escape spike this ADR required before a mail connector ships,
+> for `Read`, `Agent` and `WebFetch`. `Write`, `Edit` and MCP dispatch are not
+> covered.
+
 ## Alternatives considered
 
 **One-way downgrade only.** The original design. Rejected as reactive: it accepts

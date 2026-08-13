@@ -16,6 +16,7 @@ designed around. A spike is a throwaway script with a pass criterion written dow
 | [0008](0008-sandbox-integration.md) | Does Claude Code's *use* of the sandbox hold, and does it fail loudly? | ⚠️ **One finding; the rest struck.** `bwrapPath` was supplied on a channel documented to ignore it, so the substitution never took effect |
 | [0009](0009-structured-output.md) | Is structured output enforced, and what does the kernel see when it is not? | ✅ **Closes ADR-0015's cost question** — the spread is prompt-cache writes, not retries — and withdraws a fabrication finding that was false |
 | [0010](0010-non-bash-containment.md) | Does the sandbox constrain in-process tools, and does `failIfUnavailable` change anything? | ✅ **Refutes ADR-0007's "enforced twice"** for the profile it governs — the sandbox does not reach in-process tools; path-scoped deny rules do. `failIfUnavailable` measured for the first time |
+| [0011](0011-quarantine-escape.md) | Does either lock alone contain an in-process tool, and can delegation get around them? | ✅ **"Enforced twice" holds**, measured against a positive control — but only with `//abs/path/**`; the plain spelling leaked 4/4 |
 
 ## Rules
 
@@ -44,5 +45,5 @@ The spikes that must complete before implementation begins, in order:
 |---|---|
 | Retrieval quality on the **private** set of real material | [0006](0006-multilingual-retrieval.md) chose `bge-m3` on a set whose queries were written alongside its items. Real material can overturn it, and if it does, it wins |
 | Does the lexical index earn its place as a **specialist** rather than a voter? | **Still open after [0007](0007-lexical-routing.md) failed to answer it.** The fusion rule in [CONCEPTS §8](../CONCEPTS.md) is now marked open with evidence against one form of it and none for the specified form. 0007's closing section lists what the measurement needs — it is a benchmark, not a spike |
-| Does the quarantine profile hold against a **non-Bash** escape attempt? | [0010](0010-non-bash-containment.md) established what contains in-process tools; it did not try to escape the real profile, and never touched `WebFetch` or MCP dispatch. Required before any mail connector ships |
+| Can a subagent reach a file through **Bash** without the policy callback? | [0011](0011-quarantine-escape.md) saw it once and did not reproduce it. Consistent with [0008](0008-sandbox-integration.md): a sandboxed command needs no permission decision, and the sandbox restricts writes rather than reads. Required before any mail connector ships |
 | Provider usage-limit behaviour under load | The budget governor cannot be designed against a guess |
