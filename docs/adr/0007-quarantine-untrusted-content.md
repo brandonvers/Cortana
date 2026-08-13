@@ -79,6 +79,35 @@ a working session by another route.
 > before any mail connector ships, must exercise non-Bash tools rather than
 > repeating spike 0004's shell-command tests.
 
+<!-- markdownlint-disable-next-line MD028 -->
+
+> **Correction — [spike 0010](../spikes/0010-non-bash-containment.md), 2026-08-13.**
+> Claude Code 2.1.229 / Agent SDK 0.3.229, Debian 13, sonnet.
+>
+> No longer unverified. **Measured, and absent.** In one session, with the
+> sandbox demonstrably live — a Bash write refused by the filesystem with
+> bubblewrap's own EROFS — the in-process `Write` created a file outside the
+> working directory and the in-process `Read` returned one, identically to a
+> control with the sandbox switched off.
+>
+> **For the profile this ADR governs, the OS sandbox does nothing.** It contains
+> what it spawns, and this agent spawns nothing.
+>
+> The second lock exists, in a different mechanism. A **path-scoped
+> `permissions.deny` rule** refused each in-process call individually —
+> *"File is in a directory that is denied by your permission settings"* — in an
+> arm otherwise identical to the one above. That is where the quarantine
+> profile's restrictions must be expressed.
+>
+> One distinction this ADR's standing rule makes load-bearing: a **bare** tool
+> name in `deny` removes the tool from the session outright (*"Write is disabled
+> for this session"*). That is the allowlist layer this project refuses to treat
+> as a boundary. Only the path-scoped form is a per-call refusal, and only it
+> counts.
+>
+> Still unmeasured: `WebFetch` and MCP dispatch. The claim above rests on `Read`
+> and `Write`.
+
 ## Alternatives considered
 
 **One-way downgrade only.** The original design. Rejected as reactive: it accepts

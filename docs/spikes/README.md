@@ -15,6 +15,7 @@ designed around. A spike is a throwaway script with a pass criterion written dow
 | [0007](0007-lexical-routing.md) | Is the lexical index a specialist or an unconditional voter? | ❌ **Failed its own pre-registered criterion and answers nothing.** Kept as the record of what a fifth attempt would need |
 | [0008](0008-sandbox-integration.md) | Does Claude Code's *use* of the sandbox hold, and does it fail loudly? | ⚠️ **One finding; the rest struck.** `bwrapPath` was supplied on a channel documented to ignore it, so the substitution never took effect |
 | [0009](0009-structured-output.md) | Is structured output enforced, and what does the kernel see when it is not? | ✅ **Closes ADR-0015's cost question** — the spread is prompt-cache writes, not retries — and withdraws a fabrication finding that was false |
+| [0010](0010-non-bash-containment.md) | Does the sandbox constrain in-process tools, and does `failIfUnavailable` change anything? | ✅ **Refutes ADR-0007's "enforced twice"** for the profile it governs — the sandbox does not reach in-process tools; path-scoped deny rules do. `failIfUnavailable` measured for the first time |
 
 ## Rules
 
@@ -43,6 +44,5 @@ The spikes that must complete before implementation begins, in order:
 |---|---|
 | Retrieval quality on the **private** set of real material | [0006](0006-multilingual-retrieval.md) chose `bge-m3` on a set whose queries were written alongside its items. Real material can overturn it, and if it does, it wins |
 | Does the lexical index earn its place as a **specialist** rather than a voter? | **Still open after [0007](0007-lexical-routing.md) failed to answer it.** The fusion rule in [CONCEPTS §8](../CONCEPTS.md) is now marked open with evidence against one form of it and none for the specified form. 0007's closing section lists what the measurement needs — it is a benchmark, not a spike |
-| Does the sandbox constrain **non-Bash** tools? | [0008](0008-sandbox-integration.md) verified "enforced twice" for shell commands only — and the quarantine agent has no shell. The OS leg of ADR-0007 is unverified for the profile it governs |
-| Does `failIfUnavailable: true` change any outcome? | A project requirement since [0004](0004-containment.md), never once observed doing anything, across two spikes. [0008](0008-sandbox-integration.md) explains what a working attempt needs: `bwrapPath` via `managedSettings`, exercised when a command runs |
+| Does the quarantine profile hold against a **non-Bash** escape attempt? | [0010](0010-non-bash-containment.md) established what contains in-process tools; it did not try to escape the real profile, and never touched `WebFetch` or MCP dispatch. Required before any mail connector ships |
 | Provider usage-limit behaviour under load | The budget governor cannot be designed against a guess |
