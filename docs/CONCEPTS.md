@@ -288,6 +288,17 @@ credentials, and no way out.
   dispatch — the OS sandbox does not apply at all, and the second layer is a
   **path-scoped `permissions.deny` rule**, evaluated per call.
 
+  **The path must be written with a leading double slash**: `Read(//abs/path/**)`
+  holds, `Read(/abs/path/**)` does not.
+  [Spike 0011](spikes/0011-quarantine-escape.md) measured 4 leaks out of 4 for
+  the plain form and 4 holds out of 4 for the rooted one. The plain form raises
+  no error, so a profile carrying it looks protected and has one layer.
+
+  That spike also confirmed this rule in the sense the phrase actually claims:
+  against a positive control where the escape succeeded with both locks removed,
+  **each layer alone was sufficient**, and deny rules are evaluated before the
+  policy callback rather than behind it.
+
   [Spike 0010](spikes/0010-non-bash-containment.md) measured both. With the
   sandbox demonstrably live in the same session, an in-process write landed
   outside the working directory exactly as it did with the sandbox off; a
