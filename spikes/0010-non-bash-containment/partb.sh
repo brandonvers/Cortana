@@ -63,6 +63,19 @@ if [[ ! -d $RUN_HOME/.claude ]]; then
   echo "         Every arm would then fail for a reason unrelated to the sandbox." >&2
 fi
 
+# sudo sanitises PATH to secure_path, which does not contain a version manager's
+# node. The first run of this script lost all four arms to `env: 'node': No such
+# file` — a failure with nothing to do with the sandbox, which is exactly the
+# class of result this spike exists to stop reporting. Resolve the interpreter
+# through the target user's login shell, where their version manager is set up.
+NODE_BIN=$(sudo -u "$RUN_AS" -i bash -lc 'command -v node' 2>/dev/null | tail -n 1)
+if [[ -z $NODE_BIN || ! -x $NODE_BIN ]]; then
+  echo "Could not find a node binary for $RUN_AS (got: '${NODE_BIN:-}')." >&2
+  echo "Check that 'node -v' works in a login shell for that user." >&2
+  exit 1
+fi
+echo "using node: $NODE_BIN ($("$NODE_BIN" -v 2>/dev/null || echo '?'))"
+
 HAD_BACKUP=0
 cleanup() {
   rm -f "$MANAGED"
@@ -120,7 +133,7 @@ run_arm() {
   # enough, and it is removed between arms so a stale marker cannot be read as
   # this arm's evidence.
   sudo -u "$RUN_AS" env HOME="$RUN_HOME" SHIM_MARKER="$SHIM_MARKER" \
-    node "$SCRIPT_DIR/partb.ts" "$name" || echo "  (probe exited non-zero)"
+    "$NODE_BIN" "$SCRIPT_DIR/partb.ts" "$name" || echo "  (probe exited non-zero)"
 }
 
 run_arm missing-gate-on   /nonexistent/bwrap "true"

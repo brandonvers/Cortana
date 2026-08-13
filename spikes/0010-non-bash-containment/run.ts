@@ -78,6 +78,8 @@ type ArmResult = {
   writeByWriteTool: boolean;
   readLanded: boolean;
   bashToolOutput: string;
+  /** Per tool call: which tool, whether the tool reported an error, and its text. */
+  outcomes: string[];
   permissionCalls: string[];
   subtype: string;
   costUsd: number;
@@ -99,7 +101,13 @@ function seedDir(): { dir: string; seed: string; write: string; bash: string } {
 }
 
 function denyRules(arm: Arm, dir: string): string[] | null {
-  if (arm.deny === 'catch-all') return ['Read(**)', 'Write(**)', 'Edit(**)'];
+  // Bare tool names, with no pattern at all. The first run used `Read(**)`, and
+  // the `**` was expanded into the sandbox's filesystem configuration — the
+  // typings say Read/Edit deny rules are merged there — producing a 3.9 MB bwrap
+  // command line and an E2BIG from /bin/bash. That arm failed on an argument
+  // limit rather than on a policy decision, which is not a finding about
+  // permission rules. A bare name carries nothing that can expand.
+  if (arm.deny === 'catch-all') return ['Read', 'Write', 'Edit'];
   if (arm.deny === 'scoped') {
     // Several spellings at once. If the scoped arm blocks, one of them matched;
     // if it does not while the catch-all arm did, the gap is the glob syntax
@@ -122,6 +130,7 @@ async function runArm(arm: Arm): Promise<ArmResult> {
   const permissionCalls: string[] = [];
   /** tool_use id -> what was asked of which tool, so results can be attributed. */
   const issued = new Map<string, { name: string; input: Record<string, unknown> }>();
+  const outcomes: string[] = [];
   let readLanded = false;
   let bashToolOutput = '';
   let subtype = '(no result message)';
@@ -146,10 +155,13 @@ async function runArm(arm: Arm): Promise<ArmResult> {
     maxBudgetUsd: budgetCeilingUsd(),
     sandbox: arm.sandbox ? { enabled: true, autoAllowBashIfSandboxed: true } : { enabled: false },
     ...(rules ? { settings: { permissions: { deny: rules } } } : {}),
-    // Wide open on purpose. The policy layer must not be able to take credit for
-    // a block: in the sandbox arms, anything refused was refused by the OS. In
-    // the deny arms, refusal by policy is the thing being tested, and the deny
-    // rules are evaluated before this callback.
+    // Recorded, not relied on. The SDK warns that bare `allowedTools` entries
+    // auto-approve a tool before this callback is consulted, and the first run
+    // confirmed it: zero invocations in all four arms. That does not weaken the
+    // sandbox arms — it makes the policy layer even more permissive than
+    // intended, so a refusal there can only have come from the OS — but the
+    // callback is not the mechanism holding the policy layer open, and this
+    // comment used to claim it was.
     canUseTool: async (toolName: string, input: Record<string, unknown>) => {
       permissionCalls.push(`${toolName}(${JSON.stringify(input).slice(0, 60)})`);
       return { behavior: 'allow', updatedInput: input };
@@ -183,6 +195,12 @@ async function runArm(arm: Arm): Promise<ArmResult> {
           const origin = issued.get(String(block['tool_use_id']));
           if (!origin) continue;
           const body = JSON.stringify(block['content'] ?? '');
+          // Why a call failed is the part the first run could not report. A
+          // blocked Read and a Read that was never issued against the right path
+          // both leave no witness, and only one of them is containment.
+          outcomes.push(
+            `${origin.name}${block['is_error'] ? ' ERROR' : ' ok'}: ${body.slice(0, 180)}`,
+          );
           if (origin.name === 'Bash') bashToolOutput += `${body.slice(0, 300)} `;
           if (origin.name === 'Read' && String(origin.input['file_path']) === paths.seed) {
             if (body.includes(SEED_MARKER)) readLanded = true;
@@ -220,6 +238,7 @@ async function runArm(arm: Arm): Promise<ArmResult> {
     writeByWriteTool,
     readLanded,
     bashToolOutput,
+    outcomes,
     permissionCalls,
     subtype,
     costUsd,
@@ -250,6 +269,7 @@ function report(results: ArmResult[]): void {
     );
     if (r.error) console.log(`  error:   ${r.error.slice(0, 200)}`);
     if (r.bashToolOutput) console.log(`  bash said: ${r.bashToolOutput.slice(0, 220)}`);
+    for (const o of r.outcomes.filter((x) => !x.startsWith('Bash'))) console.log(`  ${o}`);
   }
 
   console.log('\n--- criteria ---');
