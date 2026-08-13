@@ -280,9 +280,20 @@ credentials, and no way out.
 - **One-way downgrade.** If untrusted content reaches a working session anyway,
   that session drops irreversibly to a restricted profile for the rest of its
   life.
-- **Two layers, always.** Every security property is enforced by the policy
-  engine *and* by an OS-level sandbox. Tool allowlists in frontmatter are
-  ergonomics, never a boundary.
+- **Two layers, always — but the second one depends on what the tool is.** Tool
+  allowlists in frontmatter remain ergonomics, never a boundary.
+
+  For a **spawned command**, the layers are the policy engine and the OS
+  sandbox. For an **in-process tool** — Read, Write, Edit, WebFetch, MCP
+  dispatch — the OS sandbox does not apply at all, and the second layer is a
+  **path-scoped `permissions.deny` rule**, evaluated per call.
+
+  [Spike 0010](spikes/0010-non-bash-containment.md) measured both. With the
+  sandbox demonstrably live in the same session, an in-process write landed
+  outside the working directory exactly as it did with the sandbox off; a
+  path-scoped deny rule then refused the identical call. A **bare** tool name in
+  `deny` is not a substitute: it removes the tool from the session, which is the
+  allowlist layer this rule exists to rule out.
 - **Generated profiles set `sandbox.allowUnsandboxedCommands: false`**, alongside
   `failIfUnavailable: true`.
 
@@ -294,11 +305,26 @@ credentials, and no way out.
   parameter without being asked to, with the write landing when the permission
   callback allowed the call.
 
-  **Adopted on the setting's documented semantics, not on a measurement.** Spike
-  0008 did not verify it is enforced, and exercised it on no path other than the
-  SDK `sandbox` option. Both settings must be asserted at runtime against pinned
-  CLI and SDK versions rather than assumed — and see that report for why "two
-  layers" does not currently hold for tools other than Bash.
+  **`allowUnsandboxedCommands: false` is adopted on the setting's documented
+  semantics, not on a measurement.** Neither spike 0008 nor
+  [0010](spikes/0010-non-bash-containment.md) verified it is enforced.
+
+  **`failIfUnavailable: true` is now measured.** Spike 0010 delivered a broken
+  `bwrapPath` through the only channel that honours it — a root-owned
+  `managed-settings.json` — and the boolean decided the outcome: with the gate
+  on, the query failed before reaching the model; with it off, the command ran
+  **unsandboxed** and the write landed outside the working directory.
+
+  Its default depends on the channel: **`true` when `enabled: true` is passed via
+  the SDK `sandbox` option, `false` from a settings file.** A kernel that
+  configures sandboxing through settings files inherits the unsafe default unless
+  it sets the key explicitly.
+
+  Two limits worth carrying: the gate fires for a *missing* sandbox binary, not a
+  *broken* one — an executable that fails still counts as available — and a deny
+  rule with an unbounded path pattern is merged into the sandbox's filesystem
+  configuration, where spike 0010 saw it expand into a 3.9 MB command line and
+  break Bash with `E2BIG`. Generated profiles must not emit unbounded patterns.
 - **Secrets never enter model context.** Encrypted at rest, scrubbed from
   subprocess environments.
 - **Real-world actions need approval.** Sending mail, publishing, spending —
