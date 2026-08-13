@@ -363,10 +363,23 @@ function report(results: ArmResult[]): void {
   for (const r of results) console.log(`  ${r.name.padEnd(15)} ${r.permissionCalls.length}`);
 }
 
-console.log(costWarning(ARMS.length * 4));
+// `ARMS=deny-catchall,deny-scoped pnpm start` re-runs only the arms that need
+// it. The sandbox pair already answered its question; paying for it again buys
+// nothing unless the instrumentation changed in a way that bears on it.
+const only = (process.env['ARMS'] ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const selected = only.length ? ARMS.filter((a) => only.includes(a.name)) : ARMS;
+if (only.length && selected.length !== only.length) {
+  const known = ARMS.map((a) => a.name).join(', ');
+  throw new Error(`Unknown arm in ARMS='${only.join(',')}'. Known arms: ${known}`);
+}
+
+console.log(costWarning(selected.length * 4));
 
 const results: ArmResult[] = [];
-for (const arm of ARMS) {
+for (const arm of selected) {
   console.log(`\n=== ${arm.name} — ${arm.why}`);
   results.push(await runArm(arm));
 }
