@@ -30,6 +30,7 @@
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 MANAGED_DIR=/etc/claude-code
 MANAGED=$MANAGED_DIR/managed-settings.json
 BACKUP=$MANAGED.spike0010.bak
@@ -47,6 +48,19 @@ if [[ -z $RUN_AS ]]; then
   echo "SUDO_USER is empty — the probe must run as the logged-in user, not root," >&2
   echo "because it needs that user's Claude Code session. Use sudo, not a root shell." >&2
   exit 1
+fi
+
+# `sudo -u` switches the uid but leaves HOME pointing at root's, so the CLI would
+# look for a session that is not there and every arm would fail for a reason that
+# has nothing to do with the sandbox. Resolve the real home explicitly.
+RUN_HOME=$(getent passwd "$RUN_AS" | cut -d: -f6)
+if [[ -z $RUN_HOME || ! -d $RUN_HOME ]]; then
+  echo "Could not resolve a home directory for $RUN_AS." >&2
+  exit 1
+fi
+if [[ ! -d $RUN_HOME/.claude ]]; then
+  echo "WARNING: $RUN_HOME/.claude does not exist — $RUN_AS may not be logged in." >&2
+  echo "         Every arm would then fail for a reason unrelated to the sandbox." >&2
 fi
 
 HAD_BACKUP=0
@@ -101,8 +115,12 @@ run_arm() {
   echo "=== $name  (bwrapPath=$path, failIfUnavailable=$gate)"
   write_managed "$path" "$gate"
   rm -f "$SHIM_MARKER"
-  sudo -u "$RUN_AS" --preserve-env=SHIM_MARKER \
-    env SHIM_MARKER="$SHIM_MARKER" node partb.ts "$name" || echo "  (probe exited non-zero)"
+  # The marker must be world-writable-adjacent: the shim runs as whoever the CLI
+  # spawns it as, while this check runs as $RUN_AS. /tmp with a fresh name is
+  # enough, and it is removed between arms so a stale marker cannot be read as
+  # this arm's evidence.
+  sudo -u "$RUN_AS" env HOME="$RUN_HOME" SHIM_MARKER="$SHIM_MARKER" \
+    node "$SCRIPT_DIR/partb.ts" "$name" || echo "  (probe exited non-zero)"
 }
 
 run_arm missing-gate-on   /nonexistent/bwrap "true"

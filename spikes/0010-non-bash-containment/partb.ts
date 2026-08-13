@@ -34,16 +34,26 @@ const WITNESS_MARKER = 'DEGRADED-9a4c17';
 async function gate(): Promise<{ ok: boolean; detail: string }> {
   const resolved = await resolveSettings({ settingSources: [] });
   const sandbox = (resolved.effective.sandbox ?? {}) as Record<string, unknown>;
-  const prov = resolved.provenance.sandbox;
   const policy = resolved.sources.filter((s) => s.source === 'managed');
+
+  // Per-key, not per-top-level-key. `provenance` reports which tier supplied
+  // `sandbox` as a whole, which would still say "managed" if the admin file
+  // carried only `enabled` and bwrapPath came from somewhere else entirely.
+  const fromPolicy = policy.find((s) => {
+    const block = (s.settings.sandbox ?? {}) as Record<string, unknown>;
+    return typeof block['bwrapPath'] === 'string';
+  });
+
   const detail =
     `bwrapPath=${String(sandbox['bwrapPath'] ?? '(absent)')} ` +
     `failIfUnavailable=${String(sandbox['failIfUnavailable'] ?? '(absent)')} ` +
-    `source=${prov?.source ?? '?'}/${prov?.policyOrigin ?? '?'} ` +
+    `suppliedBy=${fromPolicy ? `${fromPolicy.policyOrigin ?? '?'} ${fromPolicy.path ?? ''}` : '(not the policy tier)'} ` +
     `policyFiles=[${policy.map((s) => s.path ?? s.policyOrigin ?? '?').join(', ')}]`;
 
-  // The arm is only meaningful if the admin tier is the one supplying the path.
-  const ok = typeof sandbox['bwrapPath'] === 'string' && prov?.source === 'managed';
+  // The arm is only meaningful if the admin tier is the one supplying the path,
+  // and if the value that survived the merge is the one it supplied.
+  const supplied = (fromPolicy?.settings.sandbox ?? {}) as Record<string, unknown>;
+  const ok = Boolean(fromPolicy) && sandbox['bwrapPath'] === supplied['bwrapPath'];
   return { ok, detail };
 }
 
