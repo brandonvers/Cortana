@@ -113,6 +113,21 @@ const CASES: Case[] = [
     strains: 'FABRICATION — a required field the content cannot supply',
   },
   {
+    key: 'unsupplied-field-nullable',
+    prompt:
+      'In one sentence, state the boiling point of water at sea level. You have no documents, no web access and no sources.',
+    schema: {
+      type: 'object',
+      properties: {
+        answer: { type: 'string' },
+        sourceUrl: { type: ['string', 'null'], description: 'null if you have no source' },
+      },
+      required: ['answer', 'sourceUrl'],
+      additionalProperties: false,
+    },
+    strains: 'the same field with absence made expressible — the arm the first design forgot',
+  },
+  {
     key: 'closed-object',
     prompt:
       'Budapest is the capital of Hungary, has about 1.7 million residents, sits on the Danube, and was formed in 1873 from Buda, Pest and Óbuda. Report what you know using the schema.',
@@ -288,7 +303,7 @@ function describe(o: Outcome): void {
   );
   if (o.failure) console.log(`      threw: ${o.failure}`);
   if (o.hasStructured) {
-    console.log(`      structured: ${JSON.stringify(o.structured).slice(0, 260)}`);
+    console.log(`      structured: ${JSON.stringify(o.structured).slice(0, 600)}`);
   } else if (o.text) {
     console.log(`      text: "${o.text.slice(0, 200)}"`);
   }
@@ -391,19 +406,28 @@ if (easy) {
 }
 
 // The one with consequences for the kernel: schema-valid and false.
-const fabricated = by('unsupplied-field');
-if (fabricated) {
-  const value = JSON.stringify(fabricated.structured);
-  const invented = /https?:\/\//.test(value);
-  observe(
-    '5 fabrication under a required field',
-    fabricated.hasStructured
-      ? invented
-        ? `INVENTED A URL — the response is schema-valid and false, which Zod re-validation cannot catch: ${value.slice(0, 180)}`
-        : `returned structured output without a real URL: ${value.slice(0, 180)}`
-      : `no structured output; subtype=${fabricated.subtype}`,
-  );
-}
+// Reports what was returned. It does NOT judge whether the value is true.
+//
+// The first version tested the returned object against /https?:\/\// and
+// printed "INVENTED A URL — schema-valid and false". That is a shape check
+// presented as a truth verdict, in a probe whose whole subject is shape checks
+// passing on well-typed lies. It was wrong on the facts too: the URL it flagged
+// resolves (HTTP 200) and is exactly on topic, and the other value it would have
+// flagged, example.com, is the RFC 2606 reserved placeholder — the conventional
+// way to say "no real source". Nothing invented anything.
+//
+// Deciding truth needs a check this harness does not have. What it can report is
+// what came back, beside the arm where absence was expressible.
+const required = by('unsupplied-field');
+const nullable = by('unsupplied-field-nullable');
+const urlOf = (o: Outcome | undefined): string => {
+  const v = (o?.structured as { sourceUrl?: unknown } | undefined)?.sourceUrl;
+  return v === null ? 'null' : typeof v === 'string' ? v : 'absent';
+};
+observe(
+  '5 what a required field returns when the content cannot supply it',
+  `required sourceUrl -> ${urlOf(required)} · nullable sourceUrl -> ${urlOf(nullable)}. If the nullable arm returns null, the remedy is a schema in which absence is expressible, not a provenance layer. Neither value is judged true or false here.`,
+);
 
 // ---------------------------------------------------------------------------
 if (WITH_OPUS) {
