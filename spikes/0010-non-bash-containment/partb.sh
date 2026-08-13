@@ -43,6 +43,31 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+HAD_BACKUP=0
+cleanup() {
+  local existed=0
+  [[ -f $MANAGED ]] && existed=1
+  rm -f "$MANAGED"
+  if [[ $HAD_BACKUP -eq 1 ]]; then
+    mv -f "$BACKUP" "$MANAGED"
+    echo "restored the pre-existing managed-settings.json"
+  fi
+  rm -f "$SHIM" "$SHIM_MARKER"
+  # Says what actually happened. Announcing a cleanup that never had anything to
+  # clean is the same species of untruth this spike keeps finding in its own
+  # output: a message that reads like evidence and is only a code path.
+  if [[ $existed -eq 1 ]]; then
+    echo "cleaned up: $MANAGED removed"
+  else
+    echo "nothing to clean up: $MANAGED was never written"
+  fi
+}
+# Installed before anything else can fail. The previous version set this up
+# after resolving the interpreter, and when that step died under `set -e` the
+# script exited without printing a single line — including the cleanup notice.
+# A script that writes to /etc must never have a path where it exits quietly.
+trap cleanup EXIT
+
 RUN_AS=${SUDO_USER:-}
 if [[ -z $RUN_AS ]]; then
   echo "SUDO_USER is empty — the probe must run as the logged-in user, not root," >&2
@@ -64,29 +89,39 @@ if [[ ! -d $RUN_HOME/.claude ]]; then
 fi
 
 # sudo sanitises PATH to secure_path, which does not contain a version manager's
-# node. The first run of this script lost all four arms to `env: 'node': No such
-# file` — a failure with nothing to do with the sandbox, which is exactly the
-# class of result this spike exists to stop reporting. Resolve the interpreter
-# through the target user's login shell, where their version manager is set up.
-NODE_BIN=$(sudo -u "$RUN_AS" -i bash -lc 'command -v node' 2>/dev/null | tail -n 1)
-if [[ -z $NODE_BIN || ! -x $NODE_BIN ]]; then
-  echo "Could not find a node binary for $RUN_AS (got: '${NODE_BIN:-}')." >&2
-  echo "Check that 'node -v' works in a login shell for that user." >&2
+# node — the first attempt lost all four arms to `env: node: No such file`. The
+# second attempt asked a *login* shell, which does not source .bashrc where nvm
+# and fnm usually live, so `command -v node` returned non-zero; under
+# `set -o pipefail` that killed the script silently.
+#
+# So: try several routes, none of them fatal, and say which one worked. Each is
+# guarded with `|| true` because a failed lookup is information, not an error.
+find_node() {
+  local candidate
+  for candidate in \
+    "${NODE_BIN:-}" \
+    "$(command -v node 2>/dev/null || true)" \
+    "$(sudo -u "$RUN_AS" bash -lc 'command -v node' 2>/dev/null || true)" \
+    "$(sudo -u "$RUN_AS" bash -ic 'command -v node' 2>/dev/null | tr -d '\r' || true)" \
+    "$RUN_HOME/.local/share/fnm/aliases/default/bin/node" \
+    /usr/local/bin/node \
+    /usr/bin/node; do
+    [[ -n $candidate && -x $candidate ]] && { echo "$candidate"; return 0; }
+  done
+  # nvm keeps versioned directories; take the highest that exists.
+  candidate=$(ls -1d "$RUN_HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -n 1 || true)
+  [[ -n $candidate && -x $candidate ]] && { echo "$candidate"; return 0; }
+  return 1
+}
+
+NODE_BIN=$(find_node || true)
+if [[ -z ${NODE_BIN:-} || ! -x $NODE_BIN ]]; then
+  echo "Could not find a node binary for $RUN_AS." >&2
+  echo "Run it with an explicit path instead:" >&2
+  echo "  sudo NODE_BIN=\"\$(command -v node)\" ./partb.sh" >&2
   exit 1
 fi
 echo "using node: $NODE_BIN ($("$NODE_BIN" -v 2>/dev/null || echo '?'))"
-
-HAD_BACKUP=0
-cleanup() {
-  rm -f "$MANAGED"
-  if [[ $HAD_BACKUP -eq 1 ]]; then
-    mv -f "$BACKUP" "$MANAGED"
-    echo "restored the pre-existing managed-settings.json"
-  fi
-  rm -f "$SHIM" "$SHIM_MARKER"
-  echo "cleaned up: $MANAGED removed"
-}
-trap cleanup EXIT
 
 mkdir -p "$MANAGED_DIR"
 if [[ -f $MANAGED ]]; then
