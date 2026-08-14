@@ -336,6 +336,24 @@ credentials, and no way out.
   rule with an unbounded path pattern is merged into the sandbox's filesystem
   configuration, where spike 0010 saw it expand into a 3.9 MB command line and
   break Bash with `E2BIG`. Generated profiles must not emit unbounded patterns.
+- **Generated profiles set `sandbox.autoAllowBashIfSandboxed: false`.** At the
+  shipped default of `true`, a sandboxed command needs no permission decision, so
+  the policy engine is **not in the path** for any Bash call.
+  [Spike 0012](spikes/0012-bash-read-channel.md) measured a `cat` of a file
+  outside the working directory succeeding while the callback denied everything
+  and was never consulted — in the parent session and through a subagent, with
+  the sandbox demonstrably live in the same run. Two further settings close it
+  independently: a `Read(//abs/path/**)` deny rule, and an explicit
+  `sandbox.filesystem.denyRead`.
+- **Generated profiles set `strictMcpConfig: true` with an empty `mcpServers`.**
+  Without it a session reaches whatever MCP servers the operator has configured —
+  observed directly in [spike 0011](spikes/0011-quarantine-escape.md)'s
+  transcripts, with `settingSources: []` already set. A containment profile that
+  omits this is exactly as narrow as the machine it happens to run on.
+- **A tool is never denied by bare name.** `deny: ['Read']` removes the tool from
+  the session, which is the allowlist layer this project refuses to treat as a
+  boundary; it also sends the model hunting for a substitute. Denials are
+  path-scoped, so they refuse the call instead.
 - **Secrets never enter model context.** Encrypted at rest, scrubbed from
   subprocess environments.
 - **Real-world actions need approval.** Sending mail, publishing, spending —
