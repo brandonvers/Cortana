@@ -141,6 +141,27 @@ a working session by another route.
 > for `Read`, `Agent` and `WebFetch`. `Write`, `Edit` and MCP dispatch are not
 > covered.
 
+<!-- markdownlint-disable-next-line MD028 -->
+
+> **Correction — [spike 0012](../spikes/0012-bash-read-channel.md), 2026-08-14.**
+> Claude Code 2.1.229 / Agent SDK 0.3.229, Debian 13, sonnet.
+>
+> The unreproduced Bash observation above is **reproduced, and it is not an
+> anomaly**. With `sandbox.autoAllowBashIfSandboxed` at its shipped default of
+> `true`, a `cat` of a file outside the working directory succeeded while the
+> policy callback denied everything and was never consulted — in the parent
+> session and through a subagent, with the sandbox demonstrably live in the same
+> run.
+>
+> **A profile that holds Bash and relies on `canUseTool` has no read protection
+> under the defaults.** Three settings close it independently:
+> `autoAllowBashIfSandboxed: false`, a `Read(//abs/path/**)` deny rule, and an
+> explicit `sandbox.filesystem.denyRead`.
+>
+> The quarantine profile this ADR governs has no Bash, so it is unaffected. The
+> requirement lands on every profile that does — the fetcher and the mail
+> connector.
+
 ## Alternatives considered
 
 **One-way downgrade only.** The original design. Rejected as reactive: it accepts
