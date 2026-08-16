@@ -2,8 +2,13 @@
 
 **Date:** 2026-08-11 · two runs
 **Verdict:** ✅ **`bge-m3` is the default embedding model**, on measurement.
-❌ **[ADR-0010](../adr/0010-sqlite-storage.md)'s fusion does not earn its
-complexity** — the lexical indexes make the best model measurably worse.
+❌ **Unconditional fusion does not earn its complexity** — the lexical indexes
+make the best model measurably worse. The rule belongs to
+[CONCEPTS §8](../CONCEPTS.md), which specifies fusion *weighted by salience*;
+this spike measured the **unweighted 1:1** form, not the specified one.
+ADR-0010 does not contain the rule and never did — an earlier draft of this line
+attributed it there, and the correction reached §"What the fusion result
+changes" without reaching this verdict.
 **Decides:** the default embedding model, and whether the three-index design
 earns its complexity
 

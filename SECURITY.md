@@ -61,9 +61,14 @@ Pre-1.0, only the latest commit on `main` is supported. There are no backports.
 
 Two properties are worth knowing before you look for holes:
 
-1. **Security is enforced twice** — by the policy engine and by an OS-level sandbox (bubblewrap
-   on Linux, Seatbelt on macOS). A defect in one layer is a valid finding even if the other
-   layer holds.
+1. **Security is enforced twice, but the second layer depends on the tool.** For a **spawned
+   command**, the layers are the policy engine and an OS-level sandbox (bubblewrap on Linux).
+   For an **in-process tool** — Read, Write, Edit, WebFetch, MCP dispatch — the OS sandbox does
+   not apply at all, and the second layer is a path-scoped `permissions.deny` rule evaluated per
+   call. [Spike 0010](docs/spikes/0010-non-bash-containment.md) measured this for `Read` and
+   `Write`; `WebFetch` and MCP dispatch are argued from the same mechanism rather than measured.
+   A defect in one layer is a valid finding even if the other holds — and a finding against an
+   in-process tool is **not** answered by "the sandbox catches it", because it does not.
 2. **Skill and agent frontmatter is never a security boundary.** Tool allowlists declared in
    frontmatter are ergonomics. If you find a control that rests only on them, that is a bug and
    we want to hear about it.

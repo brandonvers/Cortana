@@ -61,9 +61,23 @@ survive it:
 
 ### No security property may rest on frontmatter
 
-Tool allowlists in agent or skill frontmatter are ergonomics, not a boundary. Every security
-property is enforced twice: at the policy engine and at the OS sandbox. If you write a control
-that holds only because a YAML field says so, it will be rejected in review.
+Tool allowlists in agent or skill frontmatter are ergonomics, not a boundary. If you write a
+control that holds only because a YAML field says so, it will be rejected in review.
+
+Every security property is enforced twice, but **the second layer depends on what the tool is**,
+and naming the wrong one rejects the only control that works:
+
+- **Spawned commands**: the policy engine and the OS sandbox, with
+  `sandbox.autoAllowBashIfSandboxed: false` — at the default, a sandboxed command needs no
+  permission decision and the policy engine is not in its path at all
+  ([spike 0012](docs/spikes/0012-bash-read-channel.md)).
+- **In-process tools** (Read, Write, Edit, WebFetch, MCP dispatch): the policy engine's allow
+  decision and a **path-scoped `permissions.deny` rule**. The OS sandbox does not reach them
+  ([spike 0010](docs/spikes/0010-non-bash-containment.md)).
+
+A deny rule must be written `Read(//abs/path/**)`. The single-slash form `Read(/abs/path/**)`
+leaked 4 times out of 4 in [spike 0011](docs/spikes/0011-quarantine-escape.md), raises no error,
+and leaves a profile looking protected with one layer.
 
 ### Nothing clever without a comment explaining the cleverness
 
