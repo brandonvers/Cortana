@@ -71,3 +71,23 @@ degradation, which is the most expensive kind to discover.
 Measured retrieval quality on a real test set says a different model or a
 different runtime wins. This decision names an interface and a default, and the
 default is expected to change as models improve.
+
+> **The default, filled in by [spike 0006](../spikes/0006-multilingual-retrieval.md), 2026-08-11.**
+>
+> **`bge-m3`** — MIT, 567M parameters, **1024 dimensions**, 8k context. Chosen on
+> measurement, not reputation: first on MRR, tied first on recall@5, the narrowest
+> language gap at 3.2 points, and 100% on the long items that exposed the
+> alternative's 512-token window.
+>
+> The licence was an eligibility gate rather than a tiebreak — `embeddinggemma`
+> was excluded from being the default on licence grounds before any number was
+> compared, per the project's MIT-compatibility rule.
+>
+> **This can still be overturned.** 0006's queries were written alongside its
+> items, which is the failure mode that spike's own first run demonstrated. The
+> private set of real material is the test that decides it, and it is listed as
+> outstanding.
+>
+> The dimension is **1024**, and it is a parameter rather than a constant
+> everywhere it appears: a different model changes it, and stored vectors would
+> have to be recomputed.

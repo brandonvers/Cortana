@@ -8,7 +8,7 @@ designed around. A spike is a throwaway script with a pass criterion written dow
 |---|---|---|
 | [0001](0001-drizzle-kit-typescript-7.md) | Does the migration tool work under TypeScript 7, which shipped without a compiler API? | ✅ Pass |
 | [0002](0002-sqlite-vec-fts5-multilingual.md) | Do the vector extension and full-text search work on both targets, does full-text search actually fail on inflected languages, and how far does brute-force vector search scale? | ✅ Pass on both platforms; the failure is real; ceiling measured at ~65k vectors |
-| [0003](0003-concurrent-sessions.md) | Can the hardware sustain a dozen concurrent long-lived agent sessions, and is waking a dormant one fast enough? | ✅ Pass — 264 MB per session, flat across scale; dormancy costs 656 ms per wake |
+| [0003](0003-concurrent-sessions.md) | Can the hardware sustain a dozen concurrent long-lived agent sessions, and is waking a dormant one fast enough? | ✅ Pass — 264 MB per session, flat across scale; dormancy is close to free (−195 ms on the realistic profile; −552 ms to +656 ms across profiles, sign model-dependent) |
 | [0004](0004-containment.md) | Does the quarantine profile hold against injection, and does the OS sandbox actually contain? | ✅ Pass — zero escapes, and bubblewrap contains on the target |
 | [0005](0005-durable-bus.md) | Does an acknowledged write survive SIGKILL, and do the delivery rules work against a real store? | ✅ Pass on both filesystems — nothing acknowledged was ever lost |
 | [0006](0006-multilingual-retrieval.md) | Does retrieval work in a language the stemmer does not cover, and which embedding model should be the default? | ⚠️ `bge-m3` chosen on measurement — but **fusion failed**: the lexical indexes make the best model worse |
@@ -46,4 +46,5 @@ The spikes that must complete before implementation begins, in order:
 |---|---|
 | Retrieval quality on the **private** set of real material | [0006](0006-multilingual-retrieval.md) chose `bge-m3` on a set whose queries were written alongside its items. Real material can overturn it, and if it does, it wins |
 | Does the lexical index earn its place as a **specialist** rather than a voter? | **Still open after [0007](0007-lexical-routing.md) failed to answer it.** The fusion rule in [CONCEPTS §8](../CONCEPTS.md) is now marked open with evidence against one form of it and none for the specified form. 0007's closing section lists what the measurement needs — it is a benchmark, not a spike |
+| Is the query embed **serial with the turn or concurrent with the wake**? | [0006](0006-multilingual-retrieval.md) measured ~620 ms on CPU and recorded that the answer changes what it means: concurrent with waking the agent it disappears, serial it is 19% on top of every turn. The GPU driver decision is deferred on the same question, and nothing else in `docs/` records it |
 | Provider usage-limit behaviour under load | The budget governor cannot be designed against a guess |
