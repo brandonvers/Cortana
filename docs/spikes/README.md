@@ -18,6 +18,7 @@ designed around. A spike is a throwaway script with a pass criterion written dow
 | [0010](0010-non-bash-containment.md) | Does the sandbox constrain in-process tools, and does `failIfUnavailable` change anything? | ✅ **Refutes ADR-0007's "enforced twice"** for the profile it governs — the sandbox does not reach in-process tools; path-scoped deny rules do. `failIfUnavailable` measured for the first time |
 | [0011](0011-quarantine-escape.md) | Does either lock alone contain an in-process tool, and can delegation get around them? | ✅ **"Enforced twice" holds**, measured against a positive control — but only with `//abs/path/**`; the plain spelling leaked 4/4 |
 | [0012](0012-bash-read-channel.md) | Is Bash a read channel that both locks miss? | ⚠️ **Yes, under the shipped default.** `autoAllowBashIfSandboxed: true` keeps the policy callback out of the path; three settings close it |
+| [0013](0013-usage-headroom.md) | Can the budget governor see the wall before it hits it? | ✅ **Yes, and it is warned.** Per-window utilization is live and the provider pushes a threshold warning; the **weekly** window binds, not the five-hour one |
 
 ## Rules
 
@@ -47,4 +48,4 @@ The spikes that must complete before implementation begins, in order:
 | Retrieval quality on the **private** set of real material | [0006](0006-multilingual-retrieval.md) chose `bge-m3` on a set whose queries were written alongside its items. Real material can overturn it, and if it does, it wins |
 | Does the lexical index earn its place as a **specialist** rather than a voter? | **Still open after [0007](0007-lexical-routing.md) failed to answer it.** The fusion rule in [CONCEPTS §8](../CONCEPTS.md) is now marked open with evidence against one form of it and none for the specified form. 0007's closing section lists what the measurement needs — it is a benchmark, not a spike |
 | Is the query embed **serial with the turn or concurrent with the wake**? | [0006](0006-multilingual-retrieval.md) measured ~620 ms on CPU and recorded that the answer changes what it means: concurrent with waking the agent it disappears, serial it is 19% on top of every turn. The GPU driver decision is deferred on the same question, and nothing else in `docs/` records it |
-| Provider usage-limit behaviour under load | The budget governor cannot be designed against a guess |
+| ~~Provider usage-limit behaviour under load~~ | **Closed by [0013](0013-usage-headroom.md)** for everything the governor needs in order to avoid the limit. What happens *at* the limit stays unmeasured on purpose — the measurement costs the operator their working window — and is a robustness question rather than a blocker |
