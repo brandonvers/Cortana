@@ -1,0 +1,13 @@
+{
+  "name": "spike-0013-usage-headroom",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway: can the budget governor read its remaining headroom without hitting the limit",
+  "scripts": {
+    "start": "node run.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.229"
+  }
+}
