@@ -416,6 +416,38 @@ Everything that touches the provider lives behind a single port, and exactly one
 package may import that provider's types. Provider policy on programmatic use has
 moved more than once, and a boundary is cheaper to maintain than a migration.
 
+### 9.1 The governor reads the account, and is warned before the wall
+
+[Spike 0013](spikes/0013-usage-headroom.md) measured what the budget governor can
+know without approaching the limit, which is more than the design assumed.
+
+- **Per-window utilization and reset times are readable and live.** Four turns of
+  work moved the five-hour window measurably in the same run.
+- **The provider pushes a warning**, with the threshold that triggered it, the
+  window it belongs to, and when that window resets. The governor does not have
+  to poll or invent its own thresholds.
+- **The weekly window is the binding one.** In the measured run the five-hour
+  window read 37% while the seven-day read 87% and was the one that warned. A
+  governor watching only the short window would have seen room that was not there.
+
+Three constraints on using it, all measured:
+
+- **It reports the account, not the session.** Concurrent agents share one meter,
+  so it decides whether to *start* expensive work; it is not per-session
+  accounting. That comes from `total_cost_usd`, which
+  [spike 0009](spikes/0009-structured-output.md) measured swinging 34× on
+  prompt-cache state alone.
+- **The two APIs use different scales** — the endpoint reports `87`, the pushed
+  event reports `0.87`. Anything reading both must normalise.
+- **The API is explicitly unstable**, named
+  `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`. Its absence is a
+  normal state the kernel degrades through, not an error.
+
+What happens **at** the limit is documented and unobserved: an assistant message
+can carry `error: 'rate_limit'`, and the rate-limit status can be `'rejected'`.
+Measuring it would cost the operator their working window, so the design avoids
+the wall rather than characterising it.
+
 ## 10. What the kernel owns
 
 Everything that must survive a restart.
