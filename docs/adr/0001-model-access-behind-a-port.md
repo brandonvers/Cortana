@@ -41,6 +41,12 @@ never proxies anyone's requests.
 **And everything that touches the provider lives behind a single `ModelRunner`
 port.** Exactly one package may import provider types, and CI enforces it.
 
+> Enforced since 2026-08-23 by `scripts/check-boundaries.mjs`, which pins each
+> provider module to the one package permitted to import it — declaring the
+> dependency counts as importing it — and verifies its own detector against
+> fixtures on every run, because with no runner package written yet the rule is
+> trivially satisfied and a broken check would pass silently.
+
 ## Consequences
 
 - Users pay nothing beyond a subscription they already have.

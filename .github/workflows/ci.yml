@@ -50,6 +50,12 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      # ADR-0001's mitigation for provider-policy risk is that contact with a
+      # provider lives in one package. That ADR has said CI enforces it since
+      # 2026-08-10; this step is where that became true.
+      - name: Provider boundary
+        run: pnpm run check:boundaries
+
       - name: Test
         run: pnpm run test
 
