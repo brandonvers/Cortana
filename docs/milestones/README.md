@@ -18,6 +18,12 @@ is corrected in place and the correction says what changed.
 | M5 | Scheduler, durable jobs, budget governor | not written |
 | M6 | Dashboard, ops CLI, packaging | not written |
 
+A plan carries a status, and it means the same four things every time:
+**Proposed** while it is being argued about, **Accepted** once the decisions in
+it are taken, **In progress** while the milestone is being built, and **Done**
+when its definition of done is met — which is the gate the next milestone waits
+on.
+
 **A plan is not an [ADR](../adr/).** A decision that outlives its milestone — a
 dependency, a boundary, a guarantee — belongs in an ADR, and the plan links to
 it. The plan is the sequencing; the ADR is the commitment.

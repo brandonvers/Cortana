@@ -1,6 +1,6 @@
 # M1 — the kernel skeleton
 
-**Status:** Proposed
+**Status:** Accepted — not started
 **Date:** 2026-08-23
 **Version target:** `0.1.0-alpha` → `0.1.0`
 
@@ -41,6 +41,8 @@ written before the work instead of after it.
       process and reopens the file** — not by assertion
 - [ ] Logs are structured and levelled, and **a secret placed in configuration
       never appears in one**, verified by a test rather than by review
+- [ ] The secret store **reports at boot which mechanism it is using**, so a
+      degraded fallback is never silent
 - [ ] A systemd unit installs, starts on boot, and restarts on failure
 - [ ] **CI enforces the provider boundary**, which today it does not
 - [ ] CI green on `ubuntu-latest` and `macos-latest`, with the native module
@@ -170,78 +172,64 @@ M1 does not have to rediscover any of this.
 | How much memory does a resident session cost? | [0003](../spikes/0003-concurrent-sessions.md) | 263–264 MB idle, flat across scale. A sizing input for the supervisor, not code M1 writes |
 | How many vectors before search misses its budget? | [0002](../spikes/0002-sqlite-vec-fts5-multilingual.md) | ~65,000 at 50 ms. **M4**, and deliberately untouched here — see below |
 
-## What M1 must decide, and has not
+## The four decisions M1 could not avoid
 
-### 1. `synchronous = FULL` or `NORMAL`
+All four were taken on **2026-08-23**. Two of them outlive the milestone and are
+recorded as ADRs, so the reasoning is not repeated here.
 
-Spike 0005 measured durability at `FULL` and refused to generalise from it:
+### 1. `synchronous = FULL` — [ADR-0017](../adr/0017-durability-over-throughput.md)
 
-> Production will likely want `NORMAL`, which is sufficient for *process*
-> crashes — the case actually tested here — but permits losing the last
-> transaction on *power* loss. That is a separate decision, and it should be made
-> explicitly rather than inherited.
+[Spike 0005](../spikes/0005-durable-bus.md) measured durability at `FULL` and
+explicitly refused to generalise from it, leaving the choice to a person. It is
+`FULL`: the same spike measured the bus at **1.1 ms against an 11,198 ms model
+turn**, so there is no latency budget for the speed to buy anything for. More
+generally — where a storage setting trades durability for throughput, this
+project takes durability, and reversing that needs a measurement rather than an
+argument.
 
-`FULL` fsyncs the WAL on every commit. `NORMAL` in WAL mode syncs at checkpoints:
-faster, and at most the last transaction is lost — on power loss or a kernel
-panic, **not** on a process crash.
+### 2. Secrets are sealed by the OS — [ADR-0018](../adr/0018-secrets-at-rest.md)
 
-**Recommendation: `FULL`.** The 1.1 ms figure above says there is nothing to buy
-with the speed, and the deployment target is a machine in a home, where power
-loss is a real failure mode rather than a data-centre abstraction. If measurement
-later shows `FULL` costing something that matters, that is an ADR with a number
-in it.
+`systemd-creds` sealed to the TPM on Linux, the Keychain on macOS, and a `0600`
+file as an **announced** fallback, all behind one `SecretStore` port. No npm
+dependency. Separately and unconditionally: a `Secret` type whose value cannot
+reach a log line, an audit record, or an error message.
 
-### 2. How secrets are held at rest
+**One precondition to check on the server before M1 relies on it:**
 
-ADR-0001 keeps the *provider* credential out of the system entirely — the
-provider's own tooling holds its own authentication. So the secrets M1 has to
-plan for are **module** credentials: a mailbox password, a calendar token. None
-exists yet, which makes this the right moment to choose the mechanism and the
-wrong moment to build encryption around nothing.
+```bash
+ls -l /dev/tpmrm0
+```
 
-| | Mechanism | Protects against | Costs |
-|---|---|---|---|
-| a | File permissions only — `0600`, plus systemd `LoadCredential` | Other users on the box | Nothing. Does **not** protect a stolen disk or an inadvertent backup |
-| b | An encrypted secrets file (`age`, `sops`) | A stolen disk; backups become safe by default | A dependency, and a key-management story the user must understand. A key on the same disk protects less than it appears to |
-| c | The OS keychain | Both, on a desktop | On a headless Debian box, libsecret needs a session daemon — the "provision a service" burden ADR-0011 rejected for Redis |
-| d | `systemd-creds` with TPM2 sealing on Linux, Keychain on macOS, behind one `SecretStore` port | A stolen disk, **with the key not on it** | Two implementations, and it depends on the server actually having a TPM2 device |
+If it is absent, the Linux path is still `systemd-creds` but host-bound rather
+than hardware-sealed — a weaker claim, which the ADR requires be reported as such
+rather than described as sealed.
 
-**Recommendation: (d), with (a) as the fallback path when no TPM is present.** It
-adds no npm dependency, and it is the only option where the key is not sitting
-next to the thing it encrypts. It needs one fact checked first: whether the
-Debian server exposes `/dev/tpmrm0`.
+### 3. Migrations are forward-guaranteed from the first beta
 
-**What M1 builds regardless of the answer**, because it does not depend on it: a
-`Secret` type whose value cannot reach a log line, an audit record, or an error
-message by accident — opaque, with `toString` and JSON serialisation returning a
-redaction — and a test that proves it.
+Recorded in [RELEASING's stage table](../RELEASING.md). An alpha is explicitly
+"the maintainer, and nobody else", so a guarantee that binds only against one's
+own database is ceremony. Beta is where RELEASING already requires migrations to
+"exist and are tested", and where someone else's data first appears.
 
-### 3. When migrations become forward-guaranteed
+**What it costs M1 is not nothing, even though M1 ships an alpha.** The mechanism
+has to be built for the guarantee from the start: a tool that refuses a
+destructive migration unless it is explicitly marked is far cheaper to write
+before there are migrations than after.
 
-RELEASING says an alpha "may lose data. No upgrade path — expect to delete the
-database", while `1.0.0` requires that "upgrading never asks you to delete data".
-The guarantee starts somewhere between, and M1 should say where, because the
-answer changes what M1 writes: under a forward-only guarantee every migration
-must be additive, and the tooling has to refuse a destructive change unless it is
-explicitly marked.
+### 4. Six packages, and only one of the two queues
 
-**Recommendation: forward-guaranteed from the first `beta`.** Alpha is
-explicitly "the maintainer, and nobody else" — a guarantee that binds only
-against one's own database is ceremony. Beta is where RELEASING already requires
-that migrations "exist and are tested", and it is where someone else's data first
-appears.
+The package graph above is the decision. It stays in this plan rather than
+becoming an ADR for one reason: an ADR restating that table would be a second
+copy of it, and this project has already been bitten by a claim living in four
+places and being corrected in one.
 
-### 4. Which queue M1 builds
-
-RELEASING lists "writer queue" under M1 and "durable jobs" under M5. Those are
-two different queues and the words are close enough to cause the mistake once.
-The **writer queue** serialises SQLite writes. The **job queue** is leases,
-attempts, backoff, and idempotency keys.
-
-**Recommendation: M1 ships the writer queue and the migration mechanism, and
-creates only the tables M1 itself uses.** The job tables arrive in M5 as a
-migration — which is a better test of the migration mechanism than seeding it
-with a schema nobody is using yet.
+The second half is a scoping call. RELEASING lists "writer queue" under M1 and
+"durable jobs" under M5; those are two different queues and the words are close
+enough to cause the mistake once. **The writer queue serialises SQLite writes.
+The job queue is leases, attempts, backoff, and idempotency keys.** M1 ships the
+first, the migration mechanism, and only the tables M1 itself uses. The job
+tables arrive in M5 as a migration — which is a better test of the migration
+mechanism than seeding it with a schema nobody is using yet.
 
 ## Where this touches the retrieval question that is still open
 
