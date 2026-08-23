@@ -63,12 +63,20 @@ Each stage is a promise about what the build is fit for. They are not decoration
 | Stage | What it means | Who should run it |
 |---|---|---|
 | **alpha** | The feature exists and works on the maintainer's machine. May lose data. No upgrade path — expect to delete the database. | The maintainer, and nobody else |
-| **beta** | Feature-complete for that milestone. No known data loss. Migrations exist and are tested. Interfaces may still change. | Early adopters who accept that it will break |
+| **beta** | Feature-complete for that milestone. No known data loss. Migrations exist, are tested, and are **forward-guaranteed from here on** — a beta or later upgrade never asks you to delete data. Interfaces may still change. | Early adopters who accept that it will break |
 | **rc** | No known blocking defects. Documentation is current. Would ship as final if nothing surfaces. | Anyone willing to report bugs |
 | **stable** | No qualifier. It is done. | Anyone |
 
 **Nothing is promoted a stage on optimism.** A build moves from alpha to beta
 because migrations exist and were tested, not because it feels ready.
+
+The forward guarantee starts at beta rather than at `1.0.0` deliberately. Alpha
+is "the maintainer, and nobody else", where a promise that binds only against
+one's own database is ceremony. Beta is where someone else's data first exists,
+and it is already the stage that requires tested migrations — so it is the
+cheapest honest place to draw the line. What `1.0.0` adds is not the guarantee
+but the commitment not to break it. See
+[the M1 plan](milestones/m1-kernel-skeleton.md) for what it costs to build for.
 
 ### What 1.0.0 will mean
 
@@ -89,7 +97,9 @@ After 1.0.0, breaking either of the first two requires a major bump.
 ### Milestones and versions
 
 The build order from the design maps onto versions like this. It is a plan, not a
-contract — a milestone that turns out to need two releases gets two.
+contract — a milestone that turns out to need two releases gets two. Each
+milestone's own plan — what it builds, in what order, and what it leaves alone —
+lives in [milestones/](milestones/).
 
 | Milestone | Contents | Target |
 |---|---|---|
