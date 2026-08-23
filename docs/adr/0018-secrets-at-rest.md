@@ -47,19 +47,32 @@ This holds regardless of anything below it.
 
 ### The `SecretStore` port
 
-Storage at rest sits behind one port with platform implementations:
+Storage at rest sits behind one port, and the implementation is **discovered at
+runtime on the machine it is running on — never configured, and never pinned to
+what the maintainer's hardware happens to support.** There are four rungs, best
+first:
 
-- **Linux: `systemd-creds`, sealed to the TPM.** The credential is encrypted with
-  a key held in the TPM, not on the filesystem, and systemd decrypts it into
-  `$CREDENTIALS_DIRECTORY` at service start. The daemon reads a file it never has
-  the key for.
-- **macOS: the Keychain**, through the `security` command already on the system.
-- **Fallback: a `0600` file**, when neither is available.
+| | Mechanism | Where the key lives | Available when |
+|---|---|---|---|
+| 1 | `systemd-creds`, sealed to TPM2 | **In hardware**, never on the filesystem | Linux with a TPM2 device |
+| 2 | `systemd-creds`, host key | `/var/lib/systemd/credential.secret`, root-only, on a different file from the ciphertext | Linux with systemd |
+| 3 | The Keychain, via the `security` command already on the system | The OS keystore | macOS |
+| 4 | A `0600` file, unencrypted | Nowhere — there is no key | Anything else |
 
-**The fallback is announced at boot, not silent.** A system running with
-file-permission protection says so in its startup log and on the dashboard when
-one exists. A security property that quietly degrades is worse than one that was
-never claimed.
+On rungs 1 and 2 systemd decrypts the credential into `$CREDENTIALS_DIRECTORY`
+at service start, so the daemon reads a file it never holds the key for.
+`systemd-creds encrypt --with-key=auto` performs the 1-or-2 selection itself:
+TPM2 when the device is present, host key when it is not.
+
+**Runtime discovery is the point of the ladder, not an implementation detail.**
+The maintainer's server has no TPM, and it would be an easy and permanent mistake
+to build for rung 2 because that is what the development hardware offers. A
+machine that *can* seal to hardware must get that, without its owner configuring
+anything, and without an upgrade to this project being what finally turns it on.
+
+**Every rung below the first is announced at boot, not silent.** The startup log
+says which mechanism is in use, and the dashboard shows it when one exists. A
+security property that quietly degrades is worse than one that was never claimed.
 
 No npm dependency is added by any of this.
 
@@ -76,12 +89,20 @@ No npm dependency is added by any of this.
 - **Two implementations to maintain**, plus a fallback: three code paths where a
   simpler answer has one. The port keeps that contained, and the fallback is the
   path CI exercises since neither runner has a TPM.
-- **A precondition that is documented rather than verified.** This rests on
-  systemd's documented interface; whether the target machine exposes a TPM2
-  device (`/dev/tpmrm0`) has not been checked. If it does not, the Linux path is
-  `systemd-creds` without TPM sealing — still host-bound, key in
-  `/var/lib/systemd/credential.secret` rather than in hardware — and that is a
-  weaker claim which must be reported as such rather than described as sealed.
+- **The maintainer's own server lands on rung 2, and that is measured, not
+  assumed.** `/dev/tpmrm0` is absent on it, checked 2026-08-23. So the path this
+  project's primary deployment actually exercises is `systemd-creds` with a host
+  key: better than a config file, because the key is root-only and on a different
+  file from the ciphertext, and because the plaintext lives in a tmpfs that
+  disappears with the service — but **not** sealed, and it must never be
+  described as sealed. A copied disk that includes `/var/lib/systemd/` yields
+  plaintext.
+- **The rung selection is therefore load-bearing and needs a test, not a
+  comment.** The temptation is to build the rung the development machine offers
+  and leave the others theoretical. Rung 1 is the one that cannot be exercised
+  locally or in CI, which is exactly why it needs an explicit fake at the port
+  boundary rather than being trusted to work first time on someone else's
+  hardware.
 - **The security property is enforced twice**, which is this project's standing
   rule: the type prevents the leak that actually happens, and the OS prevents the
   one that is worse when it does. Neither is asked to cover the other's case.
@@ -93,9 +114,13 @@ No npm dependency is added by any of this.
 ## Alternatives considered
 
 **File permissions alone (`0600` plus `LoadCredential`).** Costs nothing and is
-kept as the fallback. Rejected as the default because it protects against other
-users on the box and nothing else — not a copied disk, not a backup, which are
-the realistic ways a home server's secrets escape.
+kept as the last rung, for a platform with neither systemd nor a keychain.
+Rejected as the default because it protects against other users on the box and
+nothing else — not a copied disk, not a backup, which are the realistic ways a
+home server's secrets escape. Note that it was **not** the right answer for the
+maintainer's TPM-less server either: rung 2 costs the same and is meaningfully
+better, and reaching for the bottom rung the moment the top one is unavailable
+was the error this ladder exists to prevent.
 
 **An encrypted secrets file (`age`, `sops`).** Genuinely good, and it makes
 backups safe by default. Rejected because it adds a dependency and a

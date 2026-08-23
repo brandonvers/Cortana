@@ -17,7 +17,8 @@ thrown away on purpose. Two things change with that:
 - **The package boundaries decided here are inherited by every later milestone.**
   Moving a boundary in M4 costs more than choosing it now, and the boundary that
   matters most — [ADR-0001](../adr/0001-model-access-behind-a-port.md)'s single
-  provider port — has no enforcement in CI today despite the ADR saying it does.
+  provider port — has no enforcement in CI as this plan is written, despite the
+  ADR saying it does. Step 0 below closes that.
 
 M1 builds no capability a user can see. That is what it is for. It builds the
 thing every later milestone stands on: a process that starts, holds durable
@@ -44,7 +45,7 @@ written before the work instead of after it.
 - [ ] The secret store **reports at boot which mechanism it is using**, so a
       degraded fallback is never silent
 - [ ] A systemd unit installs, starts on boot, and restarts on failure
-- [ ] **CI enforces the provider boundary**, which today it does not
+- [ ] **CI enforces the provider boundary** — step 0
 - [ ] CI green on `ubuntu-latest` and `macos-latest`, with the native module
       building on both
 
@@ -189,20 +190,22 @@ argument.
 
 ### 2. Secrets are sealed by the OS — [ADR-0018](../adr/0018-secrets-at-rest.md)
 
-`systemd-creds` sealed to the TPM on Linux, the Keychain on macOS, and a `0600`
-file as an **announced** fallback, all behind one `SecretStore` port. No npm
-dependency. Separately and unconditionally: a `Secret` type whose value cannot
-reach a log line, an audit record, or an error message.
+A four-rung ladder behind one `SecretStore` port — `systemd-creds` sealed to TPM2,
+`systemd-creds` with a host key, the macOS Keychain, and an unencrypted `0600`
+file — **discovered at runtime, never configured**, with every rung below the
+first announced at boot. No npm dependency. Separately and unconditionally: a
+`Secret` type whose value cannot reach a log line, an audit record, or an error
+message.
 
-**One precondition to check on the server before M1 relies on it:**
+**The precondition was checked, and the answer changes what M1 exercises.**
+`/dev/tpmrm0` is absent on the server, so the primary deployment runs on rung 2:
+encrypted with a root-only host key held separately from the ciphertext, and
+decrypted by systemd into a tmpfs — better than a config file, but **not sealed**,
+and the ADR forbids describing it as such.
 
-```bash
-ls -l /dev/tpmrm0
-```
-
-If it is absent, the Linux path is still `systemd-creds` but host-bound rather
-than hardware-sealed — a weaker claim, which the ADR requires be reported as such
-rather than described as sealed.
+That makes rung 1 the one M1 cannot exercise on any machine it has access to,
+including CI. It therefore needs a fake at the port boundary rather than trust
+that it works first time on hardware nobody here owns.
 
 ### 3. Migrations are forward-guaranteed from the first beta
 
