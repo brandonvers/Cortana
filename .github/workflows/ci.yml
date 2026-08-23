@@ -3,7 +3,12 @@ name: CI
 on:
   push:
     branches: [main]
+  # `edited` is not one of GitHub's defaults for pull_request, and without it the
+  # title check below can never pass once it has failed: editing the title does
+  # not re-run it, and re-running the job replays the original event payload with
+  # the old title. The only escape was to push an unrelated commit.
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 # A red main is an emergency (CONTRIBUTING.md). Cancel superseded runs on
 # branches, but never cancel a run on main.
