@@ -47,8 +47,10 @@ depends on the model**, which was measured rather than assumed:
 | `sonnet` | **succeeds** | `text \| tool_use:StructuredOutput` in one turn |
 | `opus` | **succeeds** — n=1, trivial prompt | `text \| tool_use:StructuredOutput` in one turn |
 
-> **The rows are observations, not guarantees.** Each was measured against a
-> one-field schema on a trivial prompt, on Claude Code 2.1.226 / Agent SDK
+> **The rows are observations, not guarantees.** `haiku` and `sonnet` were
+> measured against a **two-field** schema with an enum and
+> `additionalProperties: false`; `opus` against a one-field schema. Each on a
+> trivial prompt, on Claude Code 2.1.226 / Agent SDK
 > 0.3.226. `haiku` and `sonnet` come from
 > [spike 0005](../spikes/0005-durable-bus.md)'s harness, `opus` from
 > [spike 0009](../spikes/0009-structured-output.md) — a different probe, n=1.

@@ -58,7 +58,14 @@ transcript.
 
 ## Revisit when
 
-Measurement contradicts the assumption. The first spike measures memory and token
-cost for five concurrent long-lived sessions; if the cost is worse than
-projected, the split between what deserves a session and what does not moves
-rather than the topology being abandoned.
+Measurement contradicts the assumption.
+
+> **Updated: 2026-08-10 — measured in [spike 0003](../spikes/0003-concurrent-sessions.md),
+> which records this ADR as confirmed.** 263–264 MB per idle session, flat across
+> scale, and ~$0.203 per turn on the realistic profile on `sonnet`.
+>
+> The memory figure bounds **idle residents only** — it was taken after
+> `startup()` with no prompt sent — so a session doing work is not covered by it.
+> The revisit condition now reads against these numbers: if per-session memory or
+> per-turn cost moves materially past them, the split between what deserves a
+> session and what does not moves, rather than the topology being abandoned.

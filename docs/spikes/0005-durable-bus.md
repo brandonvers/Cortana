@@ -186,10 +186,17 @@ still costing about 1 ms.
   was not exercised. It should be, once the kernel's writer queue exists.
 - **`opus` was not probed**, deliberately. The model-comparison probes cost
   $0.12–$0.17 per turn on `haiku` and **$0.63 on `sonnet`**, against $0.0086 per
-  `haiku` turn in [spike 0003](0003-concurrent-sessions.md). A 70× spread on the
-  same model between two runs means the cost figures here describe these runs and
-  nothing more. **The budget governor needs its own measurement**, against
-  realistic prompts, before any of these numbers are treated as parameters.
+  `haiku` turn in [spike 0003](0003-concurrent-sessions.md). The cost figures
+  here describe these runs and nothing more. **The budget governor needs its own
+  measurement**, against realistic prompts, before any of these numbers are
+  treated as parameters.
+
+  > **Correction — [spike 0009](0009-structured-output.md), 2026-08-13.** This
+  > paragraph originally called that a "70× spread on the same model". It is not
+  > the same model: $0.63 is `sonnet` and $0.0086 is `haiku`. The measured
+  > same-model spread is **34×**, and its cause is **prompt-cache writes** rather
+  > than anything about structured output. ADR-0015 was corrected; this report,
+  > where the claim originated, was not.
 
 ## Reproducing it
 

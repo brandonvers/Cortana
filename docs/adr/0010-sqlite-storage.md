@@ -54,8 +54,12 @@ are required.
   interleaving is a source of bugs and no concurrency is being given up.
 - `sqlite-vec` is pre-1.0 and does **brute-force** KNN with no approximate index.
   At personal-memory scale brute force is exact and fast enough, which makes this
-  an advantage rather than a limitation — but it does not scale indefinitely, and
-  the point where it stops being true is worth measuring rather than discovering.
+  an advantage rather than a limitation — but it does not scale indefinitely.
+
+  **The ceiling is measured**, in [spike 0002](../spikes/0002-sqlite-vec-fts5-multilingual.md):
+  roughly **65,000 vectors** against a 50 ms budget, at 7.5 ms per 10,000 on the
+  target Xeon. That spike's own rule travels with the number: it **should be
+  measured again rather than extrapolated**, and the trigger is ~50,000 items.
 - Two lexical indexes cost write time and disk. Accepted: silently degraded
   retrieval is worse than either.
 
@@ -77,5 +81,6 @@ system, in exchange for concurrency we do not need.
 
 ## Revisit when
 
-Measured retrieval latency at realistic corpus size degrades past what brute-force
-KNN can carry, or when a target platform appears with no prebuilt native binary.
+The corpus reaches ~50,000 items, at which point the measured ~65,000-vector
+ceiling must be re-measured rather than extrapolated. Or a target platform appears
+with no prebuilt native binary.

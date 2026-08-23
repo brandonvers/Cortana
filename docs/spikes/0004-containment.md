@@ -123,6 +123,15 @@ INCONCLUSIVE rather than passing.
   to reach for, and with tools reachable the policy layer refuses.
 - **"Enforced twice" is real, not aspirational.** Both layers were exercised
   independently and both held.
+
+  > **Correction — [spike 0010](0010-non-bash-containment.md) and
+  > [spike 0011](0011-quarantine-escape.md), 2026-08-13.** This line overstates
+  > what was run here. Part A exercised the policy callback inside a session and
+  > Part B drove bubblewrap directly from a shell — the two layers were never
+  > exercised against the **same operation**, which is what "independently"
+  > claims. Spike 0011's factorial supplied that and the claim does hold for an
+  > in-process `Read`; spike 0010 established that the OS layer is not one of the
+  > two for in-process tools at all.
 - **A new hard requirement**: `sandbox.failIfUnavailable: true` in every
   kernel-generated profile, because the upstream default silently removes the OS
   layer.

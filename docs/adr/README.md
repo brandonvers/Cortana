@@ -23,6 +23,7 @@ how settled questions stay settled.
 | [0013](0013-module-isolation.md) | Modules run in-process by default, with opt-in process isolation | Accepted |
 | [0014](0014-kernel-mediated-reports.md) | The kernel receives and aggregates agent reports | Accepted |
 | [0015](0015-structured-output-at-the-model-boundary.md) | Every crossing from a model back into the kernel carries a schema | Accepted |
+| [0016](0016-retrieval-starts-with-the-wake.md) | Retrieval starts when the message arrives, not when the model is ready | Proposed |
 
 ## When to write one
 

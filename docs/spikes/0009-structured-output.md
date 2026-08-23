@@ -93,9 +93,13 @@ tokens of prompt cache while the cheap one wrote none.**
 
 That rules out the hypothesis this spike was built on. Silent structured-output
 retries would bill as **output** tokens, and output tokens barely moved. The
-cause is prompt-cache state, which [spike 0003](0003-concurrent-sessions.md)
-already measured as a ~19× effect and which is now observed directly rather than
-inferred.
+cause is prompt-cache state, observed directly here rather than inferred.
+
+An earlier draft of this paragraph attributed a "~19× effect" to
+[spike 0003](0003-concurrent-sessions.md). **That spike measures no such thing.**
+Its only cost ratio is 24×, and it compares a profile *and* a model rather than
+cache state; its only cache figure is a 1.19× difference in cached tokens read
+between profiles. Neither isolates the cache, which is why this spike had to.
 
 Across all four runs the case falls into three regimes:
 
