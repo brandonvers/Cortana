@@ -41,11 +41,33 @@ that a future reader can tell whether the finding still holds.
 
 ## Outstanding
 
-The spikes that must complete before implementation begins, in order:
+Each row blocks **the milestone it belongs to**, not all implementation.
 
-| Question | Why it is blocking |
-|---|---|
-| Retrieval quality on the **private** set of real material | [0006](0006-multilingual-retrieval.md) chose `bge-m3` on a set whose queries were written alongside its items. Real material can overturn it, and if it does, it wins |
-| Does the lexical index earn its place as a **specialist** rather than a voter? | **Still open after [0007](0007-lexical-routing.md) failed to answer it.** The fusion rule in [CONCEPTS §8](../CONCEPTS.md) is now marked open with evidence against one form of it and none for the specified form. 0007's closing section lists what the measurement needs — it is a benchmark, not a spike |
-| ~~Is the query embed serial with the turn or concurrent with the wake?~~ | **Decided by [ADR-0016](../adr/0016-retrieval-starts-with-the-wake.md)**: concurrent. It rests on one unverified assumption — that retrieved context can reach a session already waking — which is a mechanism question for the memory spike rather than a blocker here |
-| ~~Provider usage-limit behaviour under load~~ | **Closed by [0013](0013-usage-headroom.md)** for everything the governor needs in order to avoid the limit. What happens *at* the limit stays unmeasured on purpose — the measurement costs the operator their working window — and is a robustness question rather than a blocker |
+That is a change from the original rule, and the reason is that the rule outlived
+the list it was written for. It was set when the outstanding set was short and it
+was not obvious what each item gated. It now is: both open questions are about
+retrieval, which is [M4](../RELEASING.md). The assumptions M1, M2 and M3 rest on
+were measured by spikes that have closed —
+
+| Milestone | Rests on | Status |
+|---|---|---|
+| M1 — kernel, storage, migrations, writer queue | [0001](0001-drizzle-kit-typescript-7.md), [0002](0002-sqlite-vec-fts5-multilingual.md), [0005](0005-durable-bus.md) | closed |
+| M2 — model runner port, audit, cost | [0003](0003-concurrent-sessions.md), [0009](0009-structured-output.md), [0013](0013-usage-headroom.md) | closed |
+| M3 — chat, conversation loop, approvals | [0004](0004-containment.md), [0008](0008-sandbox-integration.md), [0010](0010-non-bash-containment.md), [0011](0011-quarantine-escape.md), [0012](0012-bash-read-channel.md) | closed |
+| M4 — memory, embeddings, hybrid retrieval | [0006](0006-multilingual-retrieval.md), [0007](0007-lexical-routing.md) | **open, below** |
+
+— so holding M1 on a corpus that only decides M4 buys no safety and costs the
+schedule. **M4 does not start until the rows below are closed.**
+
+One coupling to keep in view rather than assume away: if the private set
+overturns `bge-m3`, the embedding **dimension** changes.
+[ADR-0012](../adr/0012-local-embeddings.md) already records it as a parameter
+rather than a constant, and with no vectors stored the change is free — but M1's
+schema work must not hard-code 1024.
+
+| Question | Blocks | Why it is blocking |
+|---|---|---|
+| Retrieval quality on the **private** set of real material | **M4** | [0006](0006-multilingual-retrieval.md) chose `bge-m3` on a set whose queries were written alongside its items. Real material can overturn it, and if it does, it wins |
+| Does the lexical index earn its place as a **specialist** rather than a voter? | **M4** | **Still open after [0007](0007-lexical-routing.md) failed to answer it.** The fusion rule in [CONCEPTS §8](../CONCEPTS.md) is now marked open with evidence against one form of it and none for the specified form. 0007's closing section lists what the measurement needs — it is a benchmark, not a spike |
+| ~~Is the query embed serial with the turn or concurrent with the wake?~~ | — | **Decided by [ADR-0016](../adr/0016-retrieval-starts-with-the-wake.md)**: concurrent. It rests on one unverified assumption — that retrieved context can reach a session already waking — which is a mechanism question for the memory spike rather than a blocker here |
+| ~~Provider usage-limit behaviour under load~~ | — | **Closed by [0013](0013-usage-headroom.md)** for everything the governor needs in order to avoid the limit. What happens *at* the limit stays unmeasured on purpose — the measurement costs the operator their working window — and is a robustness question rather than a blocker |
