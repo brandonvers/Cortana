@@ -89,7 +89,9 @@ After 1.0.0, breaking either of the first two requires a major bump.
 ### Milestones and versions
 
 The build order from the design maps onto versions like this. It is a plan, not a
-contract — a milestone that turns out to need two releases gets two.
+contract — a milestone that turns out to need two releases gets two. Each
+milestone's own plan — what it builds, in what order, and what it leaves alone —
+lives in [milestones/](milestones/).
 
 | Milestone | Contents | Target |
 |---|---|---|

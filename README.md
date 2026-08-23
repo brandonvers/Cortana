@@ -89,7 +89,7 @@ These are invariants. A design that violates one is wrong, not merely different.
 
 ```text
 packages/     the framework — kernel, runtime, memory, policy, audit, modules
-docs/         concepts, architecture decision records, spike reports
+docs/         concepts, architecture decision records, spike reports, milestone plans
 spikes/       throwaway verification scripts; never merged into packages/
 ```
 

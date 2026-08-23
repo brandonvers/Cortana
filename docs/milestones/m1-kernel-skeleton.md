@@ -1,0 +1,333 @@
+# M1 — the kernel skeleton
+
+**Status:** Proposed
+**Date:** 2026-08-23
+**Version target:** `0.1.0-alpha` → `0.1.0`
+
+---
+
+## What M1 is
+
+The first production code in this repository. Everything before it was a spike,
+thrown away on purpose. Two things change with that:
+
+- **Dependencies become permanent** until they are deliberately removed, so each
+  one is a decision under [CONTRIBUTING § Dependencies](../../CONTRIBUTING.md)
+  rather than something a spike pinned and forgot.
+- **The package boundaries decided here are inherited by every later milestone.**
+  Moving a boundary in M4 costs more than choosing it now, and the boundary that
+  matters most — [ADR-0001](../adr/0001-model-access-behind-a-port.md)'s single
+  provider port — has no enforcement in CI today despite the ADR saying it does.
+
+M1 builds no capability a user can see. That is what it is for. It builds the
+thing every later milestone stands on: a process that starts, holds durable
+state, writes to it safely, says what it did, and stops without losing anything.
+
+## Definition of done
+
+[RELEASING §2](../RELEASING.md) makes this a gate rather than a summary, so it is
+written before the work instead of after it.
+
+- [ ] The daemon starts on a machine with no configuration, and either runs on
+      defaults or **exits naming the setting that is missing** — never a stack
+      trace
+- [ ] Migrations apply at boot; running them twice is a no-op; a database written
+      by a newer build is **refused rather than half-migrated**
+- [ ] Every write goes through one serialised writer, and **concurrent callers
+      are exercised by a test** — which [spike 0005](../spikes/0005-durable-bus.md)
+      explicitly did not do
+- [ ] `SIGTERM` drains and exits `0` within a bounded time. `SIGKILL` loses
+      nothing that was acknowledged, **proven by a test that kills a real child
+      process and reopens the file** — not by assertion
+- [ ] Logs are structured and levelled, and **a secret placed in configuration
+      never appears in one**, verified by a test rather than by review
+- [ ] A systemd unit installs, starts on boot, and restarts on failure
+- [ ] **CI enforces the provider boundary**, which today it does not
+- [ ] CI green on `ubuntu-latest` and `macos-latest`, with the native module
+      building on both
+
+## The packages
+
+```text
+                    ┌──────────┐
+                    │   core   │   no dependencies, internal or external
+                    └────┬─────┘
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+     ┌────────┐    ┌──────────┐    ┌────────┐
+     │ config │───▶│ storage  │    │  bus   │
+     └────┬───┘    └────┬─────┘    └───┬────┘
+          └─────────────┼──────────────┘
+                        ▼
+                   ┌─────────┐
+                   │ kernel  │   a library: no signals, no process
+                   └────┬────┘
+                        ▼
+                   ┌─────────┐
+                   │ daemon  │   the process, and the service unit
+                   └─────────┘
+```
+
+| Package | Owns | Depends on |
+|---|---|---|
+| `@cortana/core` | Product identity, `TrustLevel`, identifier types, the clock port, the error taxonomy. **No runtime dependencies at all** | — |
+| `@cortana/config` | The configuration schema, file and environment loading, boot validation, and the `Secret` type | `core` |
+| `@cortana/storage` | Opening the database, PRAGMAs, the Drizzle schema, migrations, and the single serialised writer | `core`, `config` |
+| `@cortana/bus` | The in-process typed event bus of [ADR-0011](../adr/0011-no-redis.md) — publisher and subscriber typed against each other at compile time | `core` |
+| `@cortana/kernel` | Start order, health, supervision, graceful shutdown — as a library with no opinion about processes | `core`, `config`, `storage`, `bus` |
+| `@cortana/daemon` | The process: entry point, signal wiring, log destination, service unit | all of the above |
+
+### Why six, and not one
+
+Three of the splits are load-bearing rather than tidy:
+
+- **`core` has no dependencies so that everything can depend on it.**
+  [ADR-0002](../adr/0002-project-name.md) requires the product name to live in
+  exactly one place, and that place has to be importable from every package —
+  including ones a third party writes.
+- **`bus` is separate because modules subscribe to it.** A module that wants an
+  event should not have to import the kernel to get the type of that event.
+- **`kernel` is separate from `daemon` because a supervision tree that installs
+  its own signal handlers cannot be tested.** That split is what turns "graceful
+  shutdown" from something verified by hand into a claim a test can make.
+
+`config` and `storage` could reasonably be one package. They are two because
+[CONCEPTS §5](../CONCEPTS.md) gives every module "a configuration schema,
+validated at boot" — so the configuration types are part of the module interface,
+and the module interface should not drag a native SQLite driver in behind it.
+
+### One naming detail
+
+The binary name is a literal string in `package.json`'s `bin` field, which makes
+it a second site that hard-codes the product name. ADR-0002's mitigation is that
+renaming stays cheap, so this belongs on the same short list as `PACKAGE_SCOPE`
+rather than being discovered during a rename.
+
+## The order of work
+
+Each numbered step is one pull request and ends with `main` green.
+
+**0. The boundary check, before there is anything to check.**
+
+ADR-0001 says "exactly one package may import provider types, and CI enforces
+it". **CI does not.** No such check exists, and the claim has been in an accepted
+ADR since 2026-08-10.
+
+It goes in first, while the cost is a script rather than a refactor: a
+`check:boundaries` script that fails the build if any package outside
+`runner-*` imports `@anthropic-ai/claude-agent-sdk` or `@anthropic-ai/claude-code`.
+This is also the cheapest moment in the project's life to write it — with no
+runner package yet, the rule is trivially satisfied, so the check can be
+validated by deliberately breaking it and watching it fail.
+
+**1. `core`** grows by the smallest amount the later steps need: branded
+identifier types, an error taxonomy, and a `Clock` port so that nothing calls
+`Date.now()` directly.
+
+The clock deserves an honest note. M1 has only three time-dependent behaviours —
+the shutdown deadline, migration bookkeeping, and log timestamps — which is thin
+justification for an abstraction. It is included because leases and backoff in M5
+need it, and retrofitting it then touches every package, while adding it now
+costs about ten lines in the package that has no dependencies. **If M5 arrives
+and it has not earned its place, it should be deleted rather than kept.**
+
+**2. `config`** — schema and loading, before storage, because the database path,
+the PRAGMA choices, and the log level are all configuration.
+
+**3. `storage`, in two parts.** First open, PRAGMAs, and migrations, which a test
+can prove against a temporary file. Then the writer queue, which is the harder
+half and which carries the debt spike 0005 named:
+
+> **One writer.** The design mandates a single serialised writer, so contention
+> was not exercised. It should be, once the kernel's writer queue exists.
+
+**4. `bus`** — small, and depends only on `core`. It could come earlier. It comes
+here because the *durable* half of what spike 0005 called "the bus" lives in
+`storage`, and building them in this order keeps that split explicit instead of
+discovering it later.
+
+**5. `kernel`** — start order, health, and shutdown. This is where the ordering
+constraints become code: the writer drains before the database closes, the
+database closes before the logger flushes, and the process exits after that.
+
+**6. `daemon`** — entry point, signal wiring, unit file. Last, because it is the
+thinnest layer and everything it wires must already work without it.
+
+**7. The crash test, promoted from a spike.** Spike 0005's kill test becomes a
+real test in this repository. It is the only way *durable before acknowledged*
+is a fact about this codebase rather than about a spike that was deleted.
+
+## What the spikes already settle
+
+M1 does not have to rediscover any of this.
+
+| Question M1 would otherwise face | Settled by | What it hands M1 |
+|---|---|---|
+| Does the migration tool work under TypeScript 7? | [0001](../spikes/0001-drizzle-kit-typescript-7.md) | Yes. `drizzle-kit` bundles esbuild and never touches the compiler API, so the missing 7.0 API is irrelevant |
+| Is *durable before acknowledged* real under `SIGKILL`? | [0005](../spikes/0005-durable-bus.md) | Yes, on ext4 and APFS. Four kills each, zero acknowledged writes lost, zero torn payloads. Leases reclaimed at boot, redelivery idempotent |
+| Is durability worth its cost? | [0005](../spikes/0005-durable-bus.md) | The bus cost **1.1 ms against an 11,198 ms model turn**. There is no latency budget to defend, so durability settings are chosen for safety |
+| Do the report delivery rules work against a real store? | [0005](../spikes/0005-durable-bus.md) | Yes — [ADR-0014](../adr/0014-kernel-mediated-reports.md)'s three rules behaved as written. **M3 work**, but it constrains the storage shape M1 lays down |
+| How much memory does a resident session cost? | [0003](../spikes/0003-concurrent-sessions.md) | 263–264 MB idle, flat across scale. A sizing input for the supervisor, not code M1 writes |
+| How many vectors before search misses its budget? | [0002](../spikes/0002-sqlite-vec-fts5-multilingual.md) | ~65,000 at 50 ms. **M4**, and deliberately untouched here — see below |
+
+## What M1 must decide, and has not
+
+### 1. `synchronous = FULL` or `NORMAL`
+
+Spike 0005 measured durability at `FULL` and refused to generalise from it:
+
+> Production will likely want `NORMAL`, which is sufficient for *process*
+> crashes — the case actually tested here — but permits losing the last
+> transaction on *power* loss. That is a separate decision, and it should be made
+> explicitly rather than inherited.
+
+`FULL` fsyncs the WAL on every commit. `NORMAL` in WAL mode syncs at checkpoints:
+faster, and at most the last transaction is lost — on power loss or a kernel
+panic, **not** on a process crash.
+
+**Recommendation: `FULL`.** The 1.1 ms figure above says there is nothing to buy
+with the speed, and the deployment target is a machine in a home, where power
+loss is a real failure mode rather than a data-centre abstraction. If measurement
+later shows `FULL` costing something that matters, that is an ADR with a number
+in it.
+
+### 2. How secrets are held at rest
+
+ADR-0001 keeps the *provider* credential out of the system entirely — the
+provider's own tooling holds its own authentication. So the secrets M1 has to
+plan for are **module** credentials: a mailbox password, a calendar token. None
+exists yet, which makes this the right moment to choose the mechanism and the
+wrong moment to build encryption around nothing.
+
+| | Mechanism | Protects against | Costs |
+|---|---|---|---|
+| a | File permissions only — `0600`, plus systemd `LoadCredential` | Other users on the box | Nothing. Does **not** protect a stolen disk or an inadvertent backup |
+| b | An encrypted secrets file (`age`, `sops`) | A stolen disk; backups become safe by default | A dependency, and a key-management story the user must understand. A key on the same disk protects less than it appears to |
+| c | The OS keychain | Both, on a desktop | On a headless Debian box, libsecret needs a session daemon — the "provision a service" burden ADR-0011 rejected for Redis |
+| d | `systemd-creds` with TPM2 sealing on Linux, Keychain on macOS, behind one `SecretStore` port | A stolen disk, **with the key not on it** | Two implementations, and it depends on the server actually having a TPM2 device |
+
+**Recommendation: (d), with (a) as the fallback path when no TPM is present.** It
+adds no npm dependency, and it is the only option where the key is not sitting
+next to the thing it encrypts. It needs one fact checked first: whether the
+Debian server exposes `/dev/tpmrm0`.
+
+**What M1 builds regardless of the answer**, because it does not depend on it: a
+`Secret` type whose value cannot reach a log line, an audit record, or an error
+message by accident — opaque, with `toString` and JSON serialisation returning a
+redaction — and a test that proves it.
+
+### 3. When migrations become forward-guaranteed
+
+RELEASING says an alpha "may lose data. No upgrade path — expect to delete the
+database", while `1.0.0` requires that "upgrading never asks you to delete data".
+The guarantee starts somewhere between, and M1 should say where, because the
+answer changes what M1 writes: under a forward-only guarantee every migration
+must be additive, and the tooling has to refuse a destructive change unless it is
+explicitly marked.
+
+**Recommendation: forward-guaranteed from the first `beta`.** Alpha is
+explicitly "the maintainer, and nobody else" — a guarantee that binds only
+against one's own database is ceremony. Beta is where RELEASING already requires
+that migrations "exist and are tested", and it is where someone else's data first
+appears.
+
+### 4. Which queue M1 builds
+
+RELEASING lists "writer queue" under M1 and "durable jobs" under M5. Those are
+two different queues and the words are close enough to cause the mistake once.
+The **writer queue** serialises SQLite writes. The **job queue** is leases,
+attempts, backoff, and idempotency keys.
+
+**Recommendation: M1 ships the writer queue and the migration mechanism, and
+creates only the tables M1 itself uses.** The job tables arrive in M5 as a
+migration — which is a better test of the migration mechanism than seeding it
+with a schema nobody is using yet.
+
+## Where this touches the retrieval question that is still open
+
+[ADR-0012](../adr/0012-local-embeddings.md) records the coupling in one line —
+"the dimension is **1024**, and it is a parameter rather than a constant
+everywhere it appears" — and [the outstanding list](../spikes/README.md#outstanding)
+records why it is still live: the private corpus can overturn `bge-m3`, and a
+different model changes the number.
+
+The recommendation above satisfies that **by construction rather than by
+discipline**: M1 creates no vector table, no embedding column, and does not load
+`sqlite-vec`. There is no dimension to hard-code, so the constraint cannot be
+violated by forgetting it.
+
+Two things M1 still owes the memory work:
+
+- **The open path needs a hook for loading an extension before migrations run**,
+  because a `vec0` virtual table cannot be created without `sqlite-vec` loaded.
+  That is a hook, not a schema.
+- **The configuration schema must not require an embedding model name.**
+  Requiring one would settle, in M1, the question the private corpus exists to
+  answer. If it appears at all, it appears in M4.
+
+## What M1 does not build
+
+Named so that scope creep has to be a decision rather than a drift.
+
+| Not in M1 | Where it belongs |
+|---|---|
+| The `ModelRunner` port and its adapter | M2 — M1 only enforces the boundary it will live behind |
+| The audit pipeline and cost tracking | M2 |
+| Chat, the conversation loop, approvals, the policy engine | M3 |
+| Memory schema, embeddings, retrieval | M4 |
+| Scheduler, durable jobs, the proactive gate, budget governor | M5 |
+| Dashboard, ops CLI, a second runner adapter, packaging | M6 |
+| The module host's supervision of third-party code | M6 — the failure boundary in [ADR-0013](../adr/0013-module-isolation.md) needs modules to exist |
+| A Dockerfile | Nowhere. Container deployment is not the primary path |
+| A launchd plist | Deferred. macOS is the development machine, where the daemon runs from a terminal; the systemd unit is the one a deployment needs |
+
+## Dependencies
+
+Each needs a decision before it is added. Versions and licences checked
+**2026-08-23**.
+
+| Package | Version | Licence | For |
+|---|---|---|---|
+| `better-sqlite3` | 13.0.3 | MIT | The driver. Decided in [ADR-0010](../adr/0010-sqlite-storage.md), exercised in spikes 0001, 0002 and 0005 on both targets |
+| `@types/better-sqlite3` | 9.6.0 | MIT | The package ships no types. DefinitelyTyped, `devDependency` only |
+| `drizzle-orm` | 0.45.2 | **Apache-2.0** | The query layer. Permissive, not copyleft; the patent grant and attribution obligation are satisfied by the existing `NOTICE` |
+| `drizzle-kit` | 0.31.10 | MIT | Migrations. Verified against TypeScript 7 in spike 0001 |
+| `zod` | 4.4.3 | MIT | Schema validation. Already required by [ADR-0015](../adr/0015-structured-output-at-the-model-boundary.md) at the model boundary; M1 reuses it for configuration rather than adding a second validator |
+| `pino` | 10.3.1 | MIT | Structured logging. Its `redact` option makes the secret requirement a mechanism rather than a convention |
+
+**Two of these are new decisions in substance.** `zod` is implied by an accepted
+ADR but has never been installed. `pino` has not been discussed at all — the
+alternative is writing a structured logger, which CONTRIBUTING's rule against
+hand-rolling what a maintained standard solves argues against.
+
+Considered and **not** adopted:
+
+- **`sqlite-vec`** — decided in ADR-0010, belongs to M4. M1 loads no extension.
+- **`pino-pretty`** — development ergonomics; it can wait until someone is
+  annoyed enough to ask.
+- **A UUID library** — `crypto.randomUUID()` is in the standard library.
+- **A cron parser** — M5, and it is exactly the kind of thing CONTRIBUTING says
+  not to hand-roll when the time comes.
+
+### One build-system consequence
+
+`pnpm-workspace.yaml` carries `allowBuilds: {}`, which blocks every dependency's
+build script by default. `better-sqlite3` is a native module and will need an
+explicit entry. That entry is a decision to execute a dependency's build script,
+which is precisely what the empty map exists to force someone to make on purpose.
+
+## Risks
+
+- **The native module is the only thing here that can break one platform and not
+  the other.** `better-sqlite3` must build on Linux x86_64 and macOS arm64. Both
+  have prebuilt binaries and both are in CI from the first `storage` commit, so a
+  broken platform surfaces on the pull request that causes it.
+- **Supervision is where a project of this shape usually rots.** ADR-0013 is
+  honest about the limit: in-process isolation does not survive a segfault or an
+  OOM kill. M1's answer is not to prevent crashes but to make restarting cheap —
+  which is only true if the crash test is real, which is why it is step 7 and not
+  a follow-up.
+- **The boundary check is worth only as much as its coverage.** A check that
+  matches import specifiers will not catch a transitive re-export through another
+  package. Starting narrow and honest beats a check that is trusted beyond what
+  it inspects.
