@@ -284,9 +284,16 @@ credentials, and no way out.
   allowlists in frontmatter remain ergonomics, never a boundary.
 
   For a **spawned command**, the layers are the policy engine and the OS
-  sandbox. For an **in-process tool** — Read, Write, Edit, WebFetch, MCP
-  dispatch — the OS sandbox does not apply at all, and the second layer is a
-  **path-scoped `permissions.deny` rule**, evaluated per call.
+  sandbox. For an **in-process tool**, the OS sandbox does not apply and the
+  second layer is a **path-scoped `permissions.deny` rule**, evaluated per call.
+
+  **What was actually measured is narrower than that sentence.** The sandbox's
+  absence was measured for `Read` and `Write`; the per-call deny rule was
+  measured for `Read`. `Edit`, `WebFetch` and MCP dispatch are carried on the
+  same mechanism rather than on a measurement — and for two of them the rule
+  form does not obviously apply, since a path-scoped rule cannot express an MCP
+  dispatch denial and `WebFetch` was gated by the policy callback rather than by
+  a deny rule.
 
   **The path must be written with a leading double slash**: `Read(//abs/path/**)`
   holds, `Read(/abs/path/**)` does not.
@@ -421,8 +428,9 @@ moved more than once, and a boundary is cheaper to maintain than a migration.
 [Spike 0013](spikes/0013-usage-headroom.md) measured what the budget governor can
 know without approaching the limit, which is more than the design assumed.
 
-- **Per-window utilization and reset times are readable and live.** Four turns of
-  work moved the five-hour window measurably in the same run.
+- **Per-window utilization and reset times are readable and live.** The reading
+  moved measurably within a single run. The movement is account-wide and is not a
+  per-turn rate — the account was in concurrent use while it was measured.
 - **The provider pushes a warning**, with the threshold that triggered it, the
   window it belongs to, and when that window resets. The governor does not have
   to poll or invent its own thresholds.

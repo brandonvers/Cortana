@@ -70,8 +70,9 @@ These are invariants. A design that violates one is wrong, not merely different.
 4. **Untrusted content is inspected before it is trusted.** Incoming mail and fetched web pages
    are attacker-controlled text reaching a model that can run commands. They go to a quarantine
    agent with no memory, no tools, and no way out, and only its verdict travels onward.
-5. **Every security property is enforced twice** — by the policy layer and by an OS-level
-   sandbox. Never by prompt text.
+5. **Every security property is enforced twice** — by the policy engine's allow decision and
+   by a second mechanism that depends on the tool: an OS-level sandbox for spawned commands,
+   a path-scoped deny rule for in-process ones. Never by prompt text or frontmatter.
 6. **Proactive speech is earned.** The default is silence, and the threshold is yours to set.
 7. **API-first.** The web dashboard is the first client, not a special case.
 
