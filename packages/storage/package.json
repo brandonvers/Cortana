@@ -1,0 +1,28 @@
+{
+  "name": "@cortana/storage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Opening the database, the PRAGMAs that are not negotiable, migrations, and the single writer.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "migrations"
+  ],
+  "scripts": {
+    "generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@cortana/config": "workspace:*",
+    "@cortana/core": "workspace:*",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "drizzle-kit": "^0.31.10"
+  }
+}

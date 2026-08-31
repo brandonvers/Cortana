@@ -13,4 +13,18 @@ packages:
 # `pnpm` field in package.json is ignored entirely, and `onlyBuiltDependencies`,
 # `neverBuiltDependencies`, and `ignoredBuiltDependencies` were merged into this
 # single `allowBuilds` map.
-allowBuilds: {}
+allowBuilds:
+  # Compiles the SQLite driver, or fetches the prebuilt binary for this platform.
+  # ADR-0010 chose it over node:sqlite and bun:sqlite specifically because it
+  # bundles its own SQLite build, which is what makes loadable extensions work on
+  # macOS at all — Apple's system SQLite has extension loading disabled. No
+  # version of this project runs without this script.
+  better-sqlite3: true
+
+  # Links the platform binary esbuild ships as an optional dependency. drizzle-kit
+  # reads the TypeScript schema and config through esbuild rather than through the
+  # compiler API, which is the reason spike 0001 found the migration tooling
+  # survives TypeScript 7 at all. Three versions appear: drizzle-kit's own, and an
+  # older one reached through the deprecated @esbuild-kit packages it still
+  # depends on.
+  esbuild: true
