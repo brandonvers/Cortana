@@ -4,3 +4,5 @@ export type { OpenOptions, Storage } from './open.ts';
 export { openStorage } from './open.ts';
 export type { InstanceRow, NewInstanceRow } from './schema.ts';
 export { instances } from './schema.ts';
+export type { WriteContext, Writer, WriterOptions, WriteStats } from './writer.ts';
+export { createWriter } from './writer.ts';
