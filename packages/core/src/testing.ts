@@ -8,6 +8,7 @@
  */
 
 import type { Clock } from './clock.ts';
+import type { LogFields, Logger, LogMethod } from './logging.ts';
 
 export interface ManualClock extends Clock {
   /** Moves both readings forward by `ms`. Negative values are rejected. */
@@ -35,4 +36,50 @@ export function manualClock(startEpochMs = 1_700_000_000_000): ManualClock {
       elapsed += ms;
     },
   };
+}
+
+export interface RecordedEntry {
+  readonly level: LogMethod;
+  readonly message: string;
+  readonly fields: LogFields;
+}
+
+export interface RecordingLogger extends Logger {
+  readonly entries: readonly RecordedEntry[];
+  /** Everything written, as one string. Convenient for "this must not appear". */
+  text(): string;
+}
+
+/**
+ * A logger that keeps what it was told instead of writing it anywhere.
+ *
+ * For tests that care what was logged, and — more often — for tests asserting
+ * that something was **not** logged. It deliberately does no redaction of its
+ * own: a test using it sees exactly what a caller passed, so a leak shows up
+ * here rather than being hidden by the double that was meant to reveal it.
+ */
+export function recordingLogger(inherited: LogFields = {}): RecordingLogger {
+  const entries: RecordedEntry[] = [];
+
+  const make = (base: LogFields): RecordingLogger => {
+    const record =
+      (level: LogMethod) =>
+      (message: string, fields: LogFields = {}) => {
+        entries.push({ level, message, fields: { ...base, ...fields } });
+      };
+
+    return {
+      entries,
+      text: () => JSON.stringify(entries),
+      child: (fields: LogFields) => make({ ...base, ...fields }),
+      trace: record('trace'),
+      debug: record('debug'),
+      info: record('info'),
+      warn: record('warn'),
+      error: record('error'),
+      fatal: record('fatal'),
+    };
+  };
+
+  return make(inherited);
 }

@@ -1,0 +1,21 @@
+{
+  "name": "@cortana/kernel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Start order, health, supervision, graceful shutdown, and logging. A library with no opinion about processes.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@cortana/bus": "workspace:*",
+    "@cortana/config": "workspace:*",
+    "@cortana/core": "workspace:*",
+    "@cortana/storage": "workspace:*",
+    "pino": "^10.3.1"
+  }
+}
