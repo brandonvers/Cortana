@@ -160,6 +160,16 @@ manifest with `0.0.1` is the documented workaround. No `v0.0.1` tag exists and
 none should — the value is a starting point for the arithmetic, not a claim that
 something was released.
 
+**Which means the release pull request stays open until there is something to
+release.** release-please opens one as soon as any releasable commit lands, and
+before M1 that means it proposes a version built from documentation and tooling
+commits. Merging it would create a permanent tag — §3: never moved, never
+deleted — for a repository whose own README says there is no working software.
+The first tag is `0.1.0-alpha.1`, when M1 reaches its
+[definition of done](milestones/m1-kernel-skeleton.md), and it is forced with a
+`Release-As:` footer as described above. Until then the release pull request is
+a running preview: leave it open, and let it keep updating itself.
+
 **`prerelease` is `true` in the configuration.** Every release until `1.0.0` is
 marked as a pre-release on GitHub, so nobody installs a `0.x` build believing the
 interface is stable. This is set to `false` in the same change that ships

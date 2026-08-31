@@ -13,19 +13,3 @@ Commits. Edit the commits, not this file.
 
 <!-- x-release-please-start -->
 <!-- x-release-please-end -->
-
-## Unreleased
-
-The repository holds the design, the decision record, and the project skeleton.
-**There is no working software yet**, so there is nothing to release. The first
-tagged build will be `0.1.0-alpha.1`, when the kernel skeleton reaches its
-definition of done.
-
-What exists so far:
-
-- The concept model and fourteen architecture decision records
-- Two spike reports carrying measured findings, one of which changed the design
-- A verified toolchain: pnpm workspace, TypeScript 7 with Node type stripping,
-  Biome, Vitest
-- CI on Linux and macOS, plus a privacy guard and a DCO check
-- Licence, notice, and community health files
