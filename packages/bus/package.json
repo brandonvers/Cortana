@@ -1,0 +1,17 @@
+{
+  "name": "@cortana/bus",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The in-process typed event bus. Depends on core and nothing else, so a module can subscribe without importing the kernel.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@cortana/core": "workspace:*"
+  }
+}
