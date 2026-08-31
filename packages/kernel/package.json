@@ -16,6 +16,7 @@
     "@cortana/config": "workspace:*",
     "@cortana/core": "workspace:*",
     "@cortana/storage": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "pino": "^10.3.1"
   }
 }
