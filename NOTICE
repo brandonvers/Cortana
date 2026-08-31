@@ -34,6 +34,20 @@ used here only to identify the products this software interoperates with.
 
 ---
 
+THIRD-PARTY DEPENDENCIES
+
+This project is distributed as source and does not bundle or vendor its
+dependencies. Each is installed from its own registry entry and carries its own
+licence text and copyright notice, which are retained there rather than copied
+here — a list in this file would drift out of date, and the authoritative copy
+already travels with each package.
+
+Every dependency must be under a licence compatible with MIT redistribution.
+Copyleft and source-available licences are not permitted. See CONTRIBUTING.md
+for what that means in practice and how it is checked.
+
+---
+
 USER RESPONSIBILITY
 
 This software runs with the permissions you grant it, executes commands on your
