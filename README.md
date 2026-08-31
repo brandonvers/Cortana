@@ -4,7 +4,8 @@
 
 > **Status: pre-alpha. There is no working software yet.**
 > The repository currently holds the design, the decision record, and the project skeleton.
-> Implementation begins after the verification spikes in `docs/spikes/` are complete.
+> [M1 — the kernel skeleton](docs/milestones/m1-kernel-skeleton.md) is under way; the first
+> tagged build will be `0.1.0-alpha.1`, when it reaches its definition of done.
 > Nothing here is stable, and everything may change.
 >
 > ---
