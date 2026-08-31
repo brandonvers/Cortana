@@ -3,10 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Shared identity, lifecycle, and envelope types. Depends on no other internal package.",
+  "description": "Identity, identifiers, errors, and the clock port. Depends on no other package, internal or external.",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "files": [
     "src"
