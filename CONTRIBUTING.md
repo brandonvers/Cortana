@@ -100,7 +100,17 @@ What the discussion needs to cover:
   what a well-maintained standard solves: writing your own cron parser, schema validator, or
   retry logic is a maintenance liability, not craftsmanship.
 
-`pnpm run check:licenses` runs in CI and fails the build on a disallowed licence.
+`pnpm run check:licenses` runs in CI and fails the build on a disallowed licence. It also
+fails on a **copyleft** licence — GPL, LGPL, MPL, CDDL, EPL — unless there is an entry for it
+in that script recording why it is acceptable. A warning printed on every green build is not
+a decision gate; the entry is, and it is written where the rule is enforced rather than in a
+conversation nobody can find later. Where the reason is that the package is build-time only,
+the check verifies that rather than believing it, and withdraws the exemption if the package
+ever becomes a production dependency.
+
+The check inspects the whole tree, including development and platform-specific dependencies,
+and refuses to report at all if the listing does not account for every package the workspace
+manifests declare.
 
 ## Spikes
 
