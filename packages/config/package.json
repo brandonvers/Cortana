@@ -1,0 +1,19 @@
+{
+  "name": "@cortana/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The configuration schema, where settings come from, and the Secret type that cannot be logged.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@cortana/core": "workspace:*",
+    "smol-toml": "^1.8.0",
+    "zod": "^4.5.4"
+  }
+}
