@@ -12,4 +12,6 @@ export { AppError, isAppError, isBug } from './errors.ts';
 export { PACKAGE_SCOPE, PRODUCT_NAME } from './identity.ts';
 export type { Brand, InstanceId, Uuid } from './ids.ts';
 export { newInstanceId, timestampOf, uuidV7 } from './ids.ts';
+export type { LogFields, Logger, LogMethod } from './logging.ts';
+export { LOG_METHODS } from './logging.ts';
 export type { TrustLevel } from './trust.ts';
