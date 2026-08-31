@@ -1,0 +1,76 @@
+# A systemd unit for Cortana.
+#
+# This is a template. The paths marked below are filled in at install time, and
+# packaging proper belongs to M6 — this file exists now because the definition of
+# done for M1 says a unit installs, starts on boot, and restarts on failure, and
+# because several settings here are the other half of decisions already made in
+# the code.
+#
+#   sudo useradd --system --home-dir /var/lib/cortana --shell /usr/sbin/nologin cortana
+#   sudo cp cortana.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now cortana
+
+[Unit]
+Description=Cortana
+Documentation=https://github.com/brandonvers/Cortana
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=cortana
+Group=cortana
+
+# Fill in at install time. Node runs the TypeScript directly; ADR-0009 records
+# why there is no build step.
+ExecStart=/usr/bin/node /opt/cortana/packages/daemon/src/bin.ts
+
+# systemd creates these, owns them correctly, and exports $STATE_DIRECTORY and
+# $CONFIGURATION_DIRECTORY. The config loader prefers $STATE_DIRECTORY for
+# dataDir precisely so that a packaged service and a hand-run process agree with
+# nothing configured.
+StateDirectory=cortana
+StateDirectoryMode=0700
+ConfigurationDirectory=cortana
+
+# Must exceed the daemon's own shutdown deadline, which defaults to 15s and is
+# capped at 600s. systemd sends SIGKILL when this expires, so a value below the
+# application's own budget would make the graceful path unreachable.
+TimeoutStopSec=45
+
+Restart=on-failure
+RestartSec=5
+# Exit code 2 is a configuration error (see src/exit.ts). Restarting will fail
+# in exactly the same way, so it is not restarted — the operator has to act.
+RestartPreventExitStatus=2
+
+# Logs go to stdout as JSON and the journal collects them. No file, no rotation.
+StandardOutput=journal
+StandardError=journal
+
+# Hardening. Each of these is a real reduction in what a compromised process can
+# reach, and none of them interferes with what this one does.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+
+# Deliberately absent: MemoryDenyWriteExecute=yes.
+#
+# It is on every hardening checklist and it breaks this service. V8 compiles
+# JavaScript to machine code at runtime and needs pages that are both writable
+# and executable to do it; with this set, Node does not start. Written down here
+# because the failure looks like a corrupt install rather than like a policy.
+
+[Install]
+WantedBy=multi-user.target

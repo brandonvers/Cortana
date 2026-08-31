@@ -1,0 +1,24 @@
+{
+  "name": "@cortana/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The process: entry point, signal handling, exit codes, and the service unit.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "cortanad": "./src/bin.ts"
+  },
+  "files": [
+    "src",
+    "packaging"
+  ],
+  "dependencies": {
+    "@cortana/config": "workspace:*",
+    "@cortana/core": "workspace:*",
+    "@cortana/kernel": "workspace:*",
+    "@cortana/storage": "workspace:*"
+  }
+}
