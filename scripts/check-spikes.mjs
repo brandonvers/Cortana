@@ -12,16 +12,96 @@
  * because an undeclared identifier is a type error rather than a style one.
  *
  * So this does the cheapest thing that closes the gap and needs no dependency
- * resolution: it parses each spike with Node's own type stripper — the exact
+ * resolution: it strips each spike with Node's own type stripper — the exact
  * mechanism that will run the file — and then checks that every identifier
  * imported from a relative module is actually exported by it.
+ *
+ * That claim about the mechanism was false until 2026-08-31. The check used to
+ * shell out to `node --experimental-strip-types --check`, which does not strip
+ * types the way running the file does: it reports a syntax error for valid
+ * TypeScript depending on what appears before the first `export`.
+ *
+ *   const x: number = 1;                    --check FAILS,  node runs it
+ *   const x: number = 1; export const y=x;  --check FAILS,  node runs it
+ *   export type T = string; const x: T='a'; --check passes, node runs it
+ *
+ * Every spike passed anyway because they all happen to open with an import or an
+ * export. That was luck: the first file to begin with an annotated declaration
+ * would have been reported as a syntax error that isn't one. `module`'s
+ * `stripTypeScriptTypes` is the actual stripper, and it answers both questions
+ * this check asks in one call — it rejects real syntax errors and rejects
+ * anything not erasable, which is what `erasableSyntaxOnly` demands of the
+ * packages and what a spike must satisfy to run at all.
  */
 
-import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 
+// The stripper is still flagged experimental, and its one-time warning would
+// print above a passing run and read like a problem. Only that warning is
+// dropped — `--no-warnings` would hide every other one too, which is how a real
+// deprecation notice goes unnoticed for a year.
+process.removeAllListeners('warning');
+process.on('warning', (warning) => {
+  if (warning.name === 'ExperimentalWarning' && /stripTypeScriptTypes/.test(warning.message))
+    return;
+  console.warn(`${warning.name}: ${warning.message}`);
+});
+
 const ROOT = resolve(import.meta.dirname, '..', 'spikes');
+
+/**
+ * Proves the stripper still rejects what it is here to reject.
+ *
+ * This is the second check in this repository to turn out not to be checking
+ * what it claimed, and both failed the same way: silently, with every file
+ * passing. A stripper replaced by a no-op would produce exactly the output below
+ * — twenty files, no complaints — so the detector is put against known input
+ * before its verdict on the spikes is allowed to mean anything.
+ */
+function selfTest() {
+  const mustAccept = [
+    // The exact shape the old check reported as a syntax error.
+    'const x: number = 1;\nconsole.log(x);\n',
+    'const x: number = 1;\nexport const y = x;\n',
+    'declare const s: unique symbol;\nexport type B<T> = T & { [s]: 1 };\n',
+  ];
+  const mustReject = [
+    'enum Direction { Up }\nexport const d = Direction.Up;\n', // not erasable
+    'namespace N { export const a = 1; }\n', //                    not erasable
+    'const = ;\n', //                                             a real syntax error
+  ];
+
+  const failures = [];
+  for (const sample of mustAccept) {
+    try {
+      stripTypeScriptTypes(sample, { mode: 'strip' });
+    } catch (error) {
+      failures.push(`rejected valid TypeScript: ${String(error.message).split('\n')[0]}`);
+    }
+  }
+  for (const sample of mustReject) {
+    let accepted = false;
+    try {
+      stripTypeScriptTypes(sample, { mode: 'strip' });
+      accepted = true;
+    } catch {
+      // Expected.
+    }
+    if (accepted) failures.push(`accepted what it must reject: ${sample.split('\n')[0]}`);
+  }
+
+  if (failures.length > 0) {
+    console.error('The type stripper is not behaving as this check assumes, so its verdict on');
+    console.error('the spikes means nothing. It failed its own fixtures:\n');
+    for (const failure of failures) console.error(`  ${failure}`);
+    process.exit(1);
+  }
+  return mustAccept.length + mustReject.length;
+}
+
+const fixtures = selfTest();
 
 /** Every .ts file under spikes/, excluding installed dependencies. */
 function collect(dir) {
@@ -56,18 +136,16 @@ for (const entry of readdirSync(ROOT)) {
 for (const file of files) {
   const rel = file.slice(ROOT.length + 1);
 
+  const source = readFileSync(file, 'utf8');
+
   // 1. Does Node's type stripper accept it? This catches syntax errors and
   //    anything that is not erasable, which is what actually runs the file.
   try {
-    execFileSync(process.execPath, ['--experimental-strip-types', '--check', file], {
-      stdio: 'pipe',
-    });
+    stripTypeScriptTypes(source, { mode: 'strip' });
   } catch (error) {
-    const stderr = String(error.stderr ?? error)
-      .split('\n')
-      .slice(0, 3)
-      .join('\n');
-    console.error(`FAIL  ${rel}\n${stderr}\n`);
+    console.error(
+      `FAIL  ${rel}\n  ${String(error.message).split('\n').slice(0, 3).join('\n  ')}\n`,
+    );
     failures += 1;
     continue;
   }
@@ -75,7 +153,6 @@ for (const file of files) {
   // 2. Does every name imported from a relative module actually exist there?
   //    This is the check that a linter cannot make and that the excluded
   //    typechecker would have made.
-  const source = readFileSync(file, 'utf8');
   const importRe = /import\s+\{([^}]+)\}\s+from\s+'(\.[^']+)'/g;
   for (const match of source.matchAll(importRe)) {
     const names = match[1]
@@ -160,4 +237,7 @@ if (failures > 0) {
   console.error(`\n${failures} problem(s) in ${files.length} spike file(s).`);
   process.exit(1);
 }
-console.log(`Spike check passed: ${files.length} file(s) parse and resolve their local imports.`);
+console.log(
+  `Spike check passed: ${files.length} file(s) strip and resolve their local imports, ` +
+    `stripper verified against ${fixtures} fixture(s).`,
+);
