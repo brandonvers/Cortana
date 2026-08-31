@@ -41,6 +41,21 @@ importers:
 
   packages/core: {}
 
+  packages/daemon:
+    dependencies:
+      '@cortana/config':
+        specifier: workspace:*
+        version: link:../config
+      '@cortana/core':
+        specifier: workspace:*
+        version: link:../core
+      '@cortana/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@cortana/storage':
+        specifier: workspace:*
+        version: link:../storage
+
   packages/kernel:
     dependencies:
       '@cortana/bus':
