@@ -1,9 +1,11 @@
 import { isAppError } from '@cortana/core';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import {
   accountUsageFrom,
   DEFAULT_MODELS,
   failureFrom,
+  jsonSchemaFor,
   totalCostFrom,
   usageFrom,
 } from './translate.ts';
@@ -199,5 +201,38 @@ describe('tiers', () => {
     for (const model of Object.values(DEFAULT_MODELS)) {
       expect(model).not.toMatch(/\d{8}/);
     }
+  });
+});
+
+describe('the JSON schema handed to the provider', () => {
+  const ANSWER = z.object({
+    verdict: z.enum(['yes', 'no']),
+    source: z.union([z.string(), z.null()]),
+  });
+
+  it('carries no dialect pointer, because the provider rejects the one Zod emits', () => {
+    // Found by running the contract against the real provider, which failed with:
+    //   --json-schema is not a valid JSON Schema: no schema with key or ref
+    //   "https://json-schema.org/draft/2020-12/schema"
+    // Nothing was wrong with the schema; the validator on the other side has no
+    // meta-schema registered under that URL, so a pointer to it is fatal.
+    expect(z.toJSONSchema(ANSWER)).toHaveProperty('$schema');
+    expect(jsonSchemaFor(ANSWER)).not.toHaveProperty('$schema');
+  });
+
+  it('keeps a nullable field representable as a null', () => {
+    // The reason the dialect stays 2020-12 rather than switching to the target
+    // that omits $schema by itself. Spike 0009 measured that making absence
+    // representable is what stops a model inventing a value for a field it has
+    // nothing to put in, and openapi-3.0 renders the same field as a nested
+    // anyOf with an enum of null.
+    expect(jsonSchemaFor(ANSWER)['properties']).toMatchObject({
+      source: { type: ['string', 'null'] },
+    });
+  });
+
+  it('still closes the object, so a model cannot add fields nobody asked for', () => {
+    expect(jsonSchemaFor(ANSWER)['additionalProperties']).toBe(false);
+    expect(jsonSchemaFor(ANSWER)['required']).toEqual(['verdict', 'source']);
   });
 });

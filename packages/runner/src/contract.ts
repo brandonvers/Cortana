@@ -217,22 +217,35 @@ export function modelRunnerContract(): readonly ContractCase[] {
     {
       name: 'reports account usage on one scale, or says it cannot',
       async run(runner) {
-        const usage = await runner.usage();
-        if (usage === null) return; // A normal answer. See the port's note.
+        // A session is opened first, and that is not incidental. A provider may
+        // expose its account meter only through a live conversation, so asking
+        // with nothing open can legitimately answer null — and then every
+        // assertion below is skipped. The first hand-run against the real
+        // adapter passed this case in 0 ms for exactly that reason, having
+        // checked nothing at all. A case that passes by not happening is worse
+        // than no case.
+        const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+        try {
+          const usage = await runner.usage();
+          if (usage === null) return; // Still a legitimate answer. See the port.
 
-        assert.ok(usage.subscription === null || typeof usage.subscription === 'string');
-        for (const [name, window] of Object.entries(usage.windows)) {
-          // Spike 0013 found the provider reporting 87 in one place and 0.87 in
-          // another, and called a mistake here "a factor of a hundred in a
-          // governor's arithmetic". The port fixes the scale; adapters normalise.
-          assert.ok(
-            window.utilization >= 0 && window.utilization <= 1,
-            `${name}: utilization must be a fraction from 0 to 1, got ${window.utilization}`,
-          );
-          assert.ok(
-            window.resetsAt instanceof Date && !Number.isNaN(window.resetsAt.getTime()),
-            `${name}: resetsAt must be a real date`,
-          );
+          assert.ok(usage.subscription === null || typeof usage.subscription === 'string');
+          for (const [name, window] of Object.entries(usage.windows)) {
+            // Spike 0013 found the provider reporting 87 in one place and 0.87
+            // in another, and called a mistake here "a factor of a hundred in a
+            // governor's arithmetic". The port fixes the scale; adapters
+            // normalise onto it.
+            assert.ok(
+              window.utilization >= 0 && window.utilization <= 1,
+              `${name}: utilization must be a fraction from 0 to 1, got ${window.utilization}`,
+            );
+            assert.ok(
+              window.resetsAt instanceof Date && !Number.isNaN(window.resetsAt.getTime()),
+              `${name}: resetsAt must be a real date`,
+            );
+          }
+        } finally {
+          await session.stop();
         }
       },
     },

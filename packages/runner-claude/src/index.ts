@@ -5,6 +5,7 @@ export {
   accountUsageFrom,
   DEFAULT_MODELS,
   failureFrom,
+  jsonSchemaFor,
   totalCostFrom,
   usageFrom,
 } from './translate.ts';
