@@ -13,10 +13,11 @@ is corrected in place and the correction says what changed.
 |---|---|---|
 | M1 | Kernel skeleton | [m1-kernel-skeleton.md](m1-kernel-skeleton.md) |
 | M2 | Model runner port, audit, cost | [m2-model-runner.md](m2-model-runner.md) |
-| M3 | Chat, conversation loop, approvals | not written |
-| M4 | Memory | not written — [blocked](../spikes/README.md#outstanding) |
-| M5 | Scheduler, durable jobs, budget governor | not written |
-| M6 | Dashboard, ops CLI, packaging | not written |
+| M3 | Chat, conversation loop, approvals | [m3-conversation.md](m3-conversation.md) |
+| M4 | The roster: residents, delegation, report aggregation | not written |
+| M5 | Memory | not written — [blocked](../spikes/README.md#outstanding) |
+| M6 | Scheduler, durable jobs, budget governor | not written |
+| M7 | Dashboard, ops CLI, packaging | not written |
 
 A plan carries a status, and it means the same four things every time:
 **Proposed** while it is being argued about, **Accepted** once the decisions in

@@ -106,9 +106,16 @@ lives in [milestones/](milestones/).
 | M1 | Kernel skeleton: config, storage, migrations, writer queue, logging, service unit, graceful shutdown | `0.1.0-alpha` → `0.1.0` |
 | M2 | Model runner port and adapter, audit pipeline, cost tracking | `0.2.0` |
 | M3 | Chat channel, conversation loop, approvals | `0.3.0` |
-| M4 | Memory: schema, embeddings, hybrid retrieval, tuning from measurement | `0.4.0` |
-| M5 | Scheduler, durable jobs, the proactive gate, budget governor | `0.5.0` |
-| M6 | Dashboard, ops CLI, second runner adapter, packaging | `0.6.0` → `1.0.0-rc` |
+| M4 | The roster: resident agents, delegation, report aggregation | `0.4.0` |
+| M5 | Memory: schema, embeddings, hybrid retrieval, tuning from measurement | `0.5.0` |
+| M6 | Scheduler, durable jobs, the proactive gate, budget governor | `0.6.0` |
+| M7 | Dashboard, ops CLI, second runner adapter, packaging | `0.7.0` → `1.0.0-rc` |
+
+M4 was added on 2026-09-02 rather than being in the original list, and the reason
+is worth keeping: planning M3 found that the roster, delegation and report
+aggregation — [CONCEPTS §3](CONCEPTS.md) and §4, and the subject of four decision
+records — appeared in no milestone at all. It is close to being the product, and
+it was missing. Everything after it moved down one.
 
 **No milestone starts before the previous one's definition of done is met.** The
 characteristic failure of a project like this is a broad, shallow, half-working

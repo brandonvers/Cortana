@@ -15,7 +15,7 @@ thrown away on purpose. Two things change with that:
   one is a decision under [CONTRIBUTING § Dependencies](../../CONTRIBUTING.md)
   rather than something a spike pinned and forgot.
 - **The package boundaries decided here are inherited by every later milestone.**
-  Moving a boundary in M4 costs more than choosing it now, and the boundary that
+  Moving a boundary in M5 costs more than choosing it now, and the boundary that
   matters most — [ADR-0001](../adr/0001-model-access-behind-a-port.md)'s single
   provider port — has no enforcement in CI as this plan is written, despite the
   ADR saying it does. Step 0 below closes that.
@@ -68,7 +68,7 @@ of the whole milestone —
 hardware, with a real kill.
 
 **Two of the steps were discovered by the service failing**, and both belong to
-M6 rather than here:
+M7 rather than here:
 
 - **Where Node comes from.** A version manager keeps it under `$HOME`, which
   `ProtectHome=yes` hides from the service; the failure is `env: 'node': No such
@@ -170,9 +170,9 @@ identifier types, an error taxonomy, and a `Clock` port so that nothing calls
 
 The clock deserves an honest note. M1 has only three time-dependent behaviours —
 the shutdown deadline, migration bookkeeping, and log timestamps — which is thin
-justification for an abstraction. It is included because leases and backoff in M5
+justification for an abstraction. It is included because leases and backoff in M6
 need it, and retrofitting it then touches every package, while adding it now
-costs about ten lines in the package that has no dependencies. **If M5 arrives
+costs about ten lines in the package that has no dependencies. **If M6 arrives
 and it has not earned its place, it should be deleted rather than kept.**
 
 **2. `config`** — schema and loading, before storage, because the database path,
@@ -212,7 +212,7 @@ M1 does not have to rediscover any of this.
 | Is durability worth its cost? | [0005](../spikes/0005-durable-bus.md) | The bus cost **1.1 ms against an 11,198 ms model turn**. There is no latency budget to defend, so durability settings are chosen for safety |
 | Do the report delivery rules work against a real store? | [0005](../spikes/0005-durable-bus.md) | Yes — [ADR-0014](../adr/0014-kernel-mediated-reports.md)'s three rules behaved as written. **M3 work**, but it constrains the storage shape M1 lays down |
 | How much memory does a resident session cost? | [0003](../spikes/0003-concurrent-sessions.md) | 263–264 MB idle, flat across scale. A sizing input for the supervisor, not code M1 writes |
-| How many vectors before search misses its budget? | [0002](../spikes/0002-sqlite-vec-fts5-multilingual.md) | ~65,000 at 50 ms. **M4**, and deliberately untouched here — see below |
+| How many vectors before search misses its budget? | [0002](../spikes/0002-sqlite-vec-fts5-multilingual.md) | ~65,000 at 50 ms. **M5**, and deliberately untouched here — see below |
 
 ## The four decisions M1 could not avoid
 
@@ -268,11 +268,11 @@ copy of it, and this project has already been bitten by a claim living in four
 places and being corrected in one.
 
 The second half is a scoping call. RELEASING lists "writer queue" under M1 and
-"durable jobs" under M5; those are two different queues and the words are close
+"durable jobs" under M6; those are two different queues and the words are close
 enough to cause the mistake once. **The writer queue serialises SQLite writes.
 The job queue is leases, attempts, backoff, and idempotency keys.** M1 ships the
 first, the migration mechanism, and only the tables M1 itself uses. The job
-tables arrive in M5 as a migration — which is a better test of the migration
+tables arrive in M6 as a migration — which is a better test of the migration
 mechanism than seeding it with a schema nobody is using yet.
 
 ## Where this touches the retrieval question that is still open
@@ -295,7 +295,7 @@ Two things M1 still owes the memory work:
   That is a hook, not a schema.
 - **The configuration schema must not require an embedding model name.**
   Requiring one would settle, in M1, the question the private corpus exists to
-  answer. If it appears at all, it appears in M4.
+  answer. If it appears at all, it appears in M5.
 
 ## What M1 does not build
 
@@ -306,10 +306,10 @@ Named so that scope creep has to be a decision rather than a drift.
 | The `ModelRunner` port and its adapter | M2 — M1 only enforces the boundary it will live behind |
 | The audit pipeline and cost tracking | M2 |
 | Chat, the conversation loop, approvals, the policy engine | M3 |
-| Memory schema, embeddings, retrieval | M4 |
-| Scheduler, durable jobs, the proactive gate, budget governor | M5 |
-| Dashboard, ops CLI, a second runner adapter, packaging | M6 |
-| The module host's supervision of third-party code | M6 — the failure boundary in [ADR-0013](../adr/0013-module-isolation.md) needs modules to exist |
+| Memory schema, embeddings, retrieval | M5 |
+| Scheduler, durable jobs, the proactive gate, budget governor | M6 |
+| Dashboard, ops CLI, a second runner adapter, packaging | M7 |
+| The module host's supervision of third-party code | M7 — the failure boundary in [ADR-0013](../adr/0013-module-isolation.md) needs modules to exist |
 | A Dockerfile | Nowhere. Container deployment is not the primary path |
 | A launchd plist | Deferred. macOS is the development machine, where the daemon runs from a terminal; the systemd unit is the one a deployment needs |
 
@@ -334,11 +334,11 @@ hand-rolling what a maintained standard solves argues against.
 
 Considered and **not** adopted:
 
-- **`sqlite-vec`** — decided in ADR-0010, belongs to M4. M1 loads no extension.
+- **`sqlite-vec`** — decided in ADR-0010, belongs to M5. M1 loads no extension.
 - **`pino-pretty`** — development ergonomics; it can wait until someone is
   annoyed enough to ask.
 - **A UUID library** — `crypto.randomUUID()` is in the standard library.
-- **A cron parser** — M5, and it is exactly the kind of thing CONTRIBUTING says
+- **A cron parser** — M6, and it is exactly the kind of thing CONTRIBUTING says
   not to hand-roll when the time comes.
 
 ### One build-system consequence
