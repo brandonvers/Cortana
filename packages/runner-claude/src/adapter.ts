@@ -1,0 +1,297 @@
+/**
+ * The Claude adapter: the only place in this repository that talks to a provider.
+ *
+ * `scripts/check-boundaries.mjs` has enforced that since M1 step 0, when there
+ * was nothing to catch. This is the file it was written for.
+ *
+ * ## The SDK is loaded dynamically, on purpose
+ *
+ * [ADR-0020](../../../docs/adr/0020-the-provider-sdk-is-a-peer-dependency.md)
+ * makes it an optional peer the user installs, so that accepting Anthropic's
+ * proprietary terms is their act rather than a side effect of installing this. A
+ * static import would end the process at module load on a machine that has not
+ * done that, with `ERR_MODULE_NOT_FOUND` and a stack trace. The ADR asks for a
+ * sentence naming the package and the reason instead, so the import happens when
+ * a runner is created and its failure is an ordinary error.
+ */
+
+import { AppError, type Logger, newSessionId } from '@cortana/core';
+import type {
+  AccountUsage,
+  ModelRunner,
+  ModelSession,
+  ModelTier,
+  SessionSpec,
+  StructuredSession,
+  StructuredTurnResult,
+  TurnResult,
+} from '@cortana/runner';
+import { type ZodType, z } from 'zod';
+import {
+  accountUsageFrom,
+  DEFAULT_MODELS,
+  failureFrom,
+  type ProviderResult,
+  totalCostFrom,
+  usageFrom,
+} from './translate.ts';
+
+const SDK_PACKAGE = '@anthropic-ai/claude-agent-sdk';
+
+export interface ClaudeRunnerOptions {
+  /** Overrides the tier-to-model mapping. */
+  readonly models?: Readonly<Record<ModelTier, string>>;
+  /** A ceiling the provider enforces per session. Absent means none. */
+  readonly maxBudgetUsd?: number;
+  readonly logger?: Logger;
+}
+
+/** The provider surface this adapter uses, named so the rest can stay untyped. */
+interface ProviderQuery extends AsyncIterable<Record<string, unknown>> {
+  close?: () => void;
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: () => Promise<
+    Record<string, unknown>
+  >;
+}
+
+/**
+ * A queue the provider reads user messages from.
+ *
+ * Streaming input is what makes one session take many turns; the alternative is
+ * a fresh process per turn, which is the cold start spike 0003 measured at
+ * 5.4–6.2 seconds.
+ */
+class PromptQueue implements AsyncIterable<unknown> {
+  #pending: unknown[] = [];
+  #wake: (() => void) | null = null;
+  #closed = false;
+
+  push(text: string): void {
+    this.#pending.push({
+      type: 'user',
+      message: { role: 'user', content: text },
+      parent_tool_use_id: null,
+    });
+    this.#wake?.();
+  }
+
+  close(): void {
+    this.#closed = true;
+    this.#wake?.();
+  }
+
+  async *[Symbol.asyncIterator](): AsyncIterator<unknown> {
+    for (;;) {
+      while (this.#pending.length > 0) yield this.#pending.shift();
+      if (this.#closed) return;
+      await new Promise<void>((resolve) => {
+        this.#wake = () => {
+          this.#wake = null;
+          resolve();
+        };
+      });
+    }
+  }
+}
+
+async function loadSdk(): Promise<{ query: (params: unknown) => ProviderQuery }> {
+  try {
+    return (await import(SDK_PACKAGE)) as { query: (params: unknown) => ProviderQuery };
+  } catch (error) {
+    throw new AppError(
+      `${SDK_PACKAGE} is not installed. It is a peer dependency you install yourself, ` +
+        'because it is proprietary and accepting its terms is your decision rather than ' +
+        `this project's — see docs/adr/0020. Install it with: pnpm add ${SDK_PACKAGE}`,
+      {
+        category: 'config',
+        code: 'provider-sdk-missing',
+        detail: { package: SDK_PACKAGE },
+        cause: error,
+      },
+    );
+  }
+}
+
+interface OpenOptions {
+  readonly spec: SessionSpec;
+  readonly schema?: ZodType<unknown>;
+}
+
+export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Promise<ModelRunner> {
+  const { query } = await loadSdk();
+  const models = options.models ?? DEFAULT_MODELS;
+  const log = options.logger?.child({ component: 'runner-claude' });
+
+  /** Sessions still open, so the account meter has somewhere to be asked. */
+  const live = new Set<ProviderQuery>();
+
+  const open = (open: OpenOptions) => {
+    const id = newSessionId();
+    const queue = new PromptQueue();
+    let stopped = false;
+    let totalCostUsd = 0;
+
+    const conversation = query({
+      prompt: queue,
+      options: {
+        model: models[open.spec.tier],
+        systemPrompt: open.spec.systemPrompt,
+        settingSources: [],
+        // A session inherits the operator's MCP servers unless both are set —
+        // measured in spike 0011 and not a default worth trusting.
+        strictMcpConfig: true,
+        mcpServers: {},
+        ...(open.schema
+          ? { outputFormat: { type: 'json_schema', schema: z.toJSONSchema(open.schema) } }
+          : {}),
+        ...(options.maxBudgetUsd === undefined ? {} : { maxBudgetUsd: options.maxBudgetUsd }),
+      },
+    });
+    live.add(conversation);
+
+    const messages = conversation[Symbol.asyncIterator]();
+
+    const runTurn = async (prompt: string): Promise<{ result: ProviderResult }> => {
+      if (stopped) {
+        throw new AppError('this session has stopped and will not take another turn', {
+          category: 'provider',
+          code: 'session-stopped',
+          detail: { session: id },
+        });
+      }
+
+      queue.push(prompt);
+      for (;;) {
+        const next = await messages.next();
+        if (next.done) {
+          throw new AppError('the provider ended the session before answering', {
+            category: 'provider',
+            code: 'session-ended-early',
+            detail: { session: id },
+          });
+        }
+        if (next.value['type'] !== 'result') continue;
+
+        const result = next.value as ProviderResult;
+        const failure = failureFrom(result);
+        if (failure) throw failure;
+        return { result };
+      }
+    };
+
+    const finish = (result: ProviderResult) => {
+      const usage = usageFrom(result, totalCostUsd);
+      totalCostUsd = totalCostFrom(result, totalCostUsd);
+      return usage;
+    };
+
+    return {
+      id,
+      tier: open.spec.tier,
+      get stopped(): boolean {
+        return stopped;
+      },
+      async stop(): Promise<void> {
+        if (stopped) return;
+        stopped = true;
+        queue.close();
+        live.delete(conversation);
+        try {
+          conversation.close?.();
+        } catch (error) {
+          // Closing a session that has already gone is not a failure worth
+          // raising during a shutdown that is trying to be tidy.
+          log?.debug('closing a provider session complained', { error: String(error) });
+        }
+      },
+      runTurn,
+      finish,
+      conversation,
+    };
+  };
+
+  return {
+    name: 'claude',
+
+    async start(spec: SessionSpec): Promise<ModelSession> {
+      const session = open({ spec });
+      return {
+        id: session.id,
+        tier: session.tier,
+        get stopped(): boolean {
+          return session.stopped;
+        },
+        stop: () => session.stop(),
+        async turn(prompt: string): Promise<TurnResult> {
+          const { result } = await session.runTurn(prompt);
+          return {
+            text: typeof result.result === 'string' ? result.result : '',
+            usage: session.finish(result),
+          };
+        },
+      };
+    },
+
+    async startStructured<Value>(
+      spec: SessionSpec,
+      schema: ZodType<Value>,
+    ): Promise<StructuredSession<Value>> {
+      const session = open({ spec, schema: schema as ZodType<unknown> });
+      return {
+        id: session.id,
+        tier: session.tier,
+        get stopped(): boolean {
+          return session.stopped;
+        },
+        stop: () => session.stop(),
+        async turn(prompt: string): Promise<StructuredTurnResult<Value>> {
+          const { result } = await session.runTurn(prompt);
+          const usage = session.finish(result);
+
+          // ADR-0015: the provider's enforcement is a strong prior, not a
+          // guarantee, and this is the boundary this project controls. Validated
+          // again here even though the schema was sent with the request.
+          const parsed = schema.safeParse(result.structured_output);
+          if (!parsed.success) {
+            throw new AppError('the model returned a value the schema rejected', {
+              category: 'provider',
+              code: 'structured-output-invalid',
+              // The value itself is deliberately absent: it is whatever the
+              // model said, which may be whatever the operator typed.
+              detail: { session: session.id, issues: parsed.error.issues.length },
+              cause: parsed.error,
+            });
+          }
+
+          return {
+            text: typeof result.result === 'string' ? result.result : '',
+            value: parsed.data,
+            usage,
+          };
+        },
+      };
+    },
+
+    /**
+     * The account meter, which the provider only exposes through a live session.
+     *
+     * That is a finding rather than a limitation of this code: the SDK's usage
+     * method is a control request on an open conversation. Opening one just to
+     * ask would cost a session — 263 MB and a cold start, per spike 0003 — so
+     * with nothing open the honest answer is `null`, which the port already
+     * documents as normal.
+     */
+    async usage(): Promise<AccountUsage | null> {
+      for (const conversation of live) {
+        const read = conversation.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+        if (typeof read !== 'function') continue;
+        try {
+          return accountUsageFrom(await read.call(conversation));
+        } catch (error) {
+          log?.debug('the provider refused to report account usage', { error: String(error) });
+        }
+      }
+      return null;
+    },
+  };
+}
