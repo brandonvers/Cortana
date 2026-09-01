@@ -55,33 +55,61 @@ export interface StructuredTurnResult<Value> extends TurnResult {
   readonly value: Value;
 }
 
-export interface ModelSession {
+/**
+ * What every session has, whatever shape its answers take.
+ *
+ * ## Why the answer's shape belongs to the session and not the turn
+ *
+ * The first version of this port put `turn` and `turnStructured` on one session,
+ * which is the obvious design and is not one every adapter could implement.
+ * Reading the provider's own interface before writing against it settled it: the
+ * output format is a parameter of the call that opens a session, there is no
+ * control method to change it afterwards, and no per-message field carries one.
+ * A session is prose or it is structured, for its whole life.
+ *
+ * That could have been worked around — a structured turn could end the session
+ * and resume it with a different format — at a cost nothing has measured, against
+ * a cold start [spike 0003](../../../docs/spikes/0003-concurrent-sessions.md)
+ * put at 5.4–6.2 s. Doing that quietly would have hidden a per-turn cost inside
+ * a method that looks free.
+ *
+ * So the port took the change instead, and [ADR-0001](../../../docs/adr/0001-model-access-behind-a-port.md)
+ * is why it is the right way round: **the port must be designed for the lower
+ * common denominator.** Every adapter can fix an output shape when a session
+ * opens; only some can switch it mid-conversation. A port shaped by the
+ * convenience is a port that the next adapter cannot satisfy — which is the
+ * failure this whole arrangement exists to prevent.
+ *
+ * **The open question this leaves**, recorded rather than answered: an agent that
+ * must both answer a person in prose and hand the kernel a decision now needs two
+ * sessions, and spike 0003 priced a session at 263 MB. Whether that is a real
+ * problem depends on whether such an agent exists, which M3 finds out. The resume
+ * path is still there if it does, and it needs measuring before it is used.
+ */
+interface SessionBase {
   readonly id: SessionId;
   readonly tier: ModelTier;
   readonly stopped: boolean;
-
-  /** A turn whose answer is prose. */
-  turn(prompt: string): Promise<TurnResult>;
-
-  /**
-   * A turn whose answer is a value of the given shape.
-   *
-   * The adapter is responsible for getting the model to produce it **and** for
-   * whatever that costs in turns — see the note on budgets at the top of
-   * `index.ts`. The result is re-validated against the schema before it is
-   * returned, per ADR-0015: the provider's enforcement is a strong prior, not a
-   * guarantee, and this is the boundary this project controls.
-   *
-   * A response that cannot be validated raises an `AppError` in the `provider`
-   * category. It is never coerced into looking valid.
-   */
-  turnStructured<Value>(
-    prompt: string,
-    schema: ZodType<Value>,
-  ): Promise<StructuredTurnResult<Value>>;
-
   /** Idempotent. A stopped session refuses further turns rather than restarting. */
   stop(): Promise<void>;
+}
+
+/** A session whose answers are prose. */
+export interface ModelSession extends SessionBase {
+  turn(prompt: string): Promise<TurnResult>;
+}
+
+/**
+ * A session whose answers are values of one shape.
+ *
+ * Every answer is re-validated against the schema before it is returned, per
+ * [ADR-0015](../../../docs/adr/0015-structured-output-at-the-model-boundary.md):
+ * the provider's enforcement is a strong prior, not a guarantee, and this is the
+ * boundary this project controls. A response that cannot be validated raises an
+ * `AppError` in the `provider` category, and is never coerced into looking valid.
+ */
+export interface StructuredSession<Value> extends SessionBase {
+  turn(prompt: string): Promise<StructuredTurnResult<Value>>;
 }
 
 /**
@@ -118,7 +146,20 @@ export interface ModelRunner {
   /** Which adapter this is. Recorded against every turn in the audit. */
   readonly name: string;
 
+  /** Opens a session that answers in prose. */
   start(spec: SessionSpec): Promise<ModelSession>;
+
+  /**
+   * Opens a session that answers with values of the given shape.
+   *
+   * The adapter is responsible for getting the model to produce them **and** for
+   * whatever that costs in turns — see the note on budgets at the top of
+   * `index.ts`.
+   */
+  startStructured<Value>(
+    spec: SessionSpec,
+    schema: ZodType<Value>,
+  ): Promise<StructuredSession<Value>>;
 
   /**
    * The account's remaining headroom, or `null` when this adapter cannot say.

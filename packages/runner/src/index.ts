@@ -46,6 +46,7 @@ export type {
   ModelSession,
   ModelTier,
   SessionSpec,
+  StructuredSession,
   StructuredTurnResult,
   TurnResult,
   TurnUsage,

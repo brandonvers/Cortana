@@ -23,6 +23,7 @@ import type {
   ModelRunner,
   ModelSession,
   SessionSpec,
+  StructuredSession,
   StructuredTurnResult,
   TurnResult,
   TurnUsage,
@@ -96,6 +97,40 @@ export function fakeRunner(script: FakeScript = {}): FakeRunner {
     return value;
   };
 
+  /**
+   * Everything both kinds of session share, so neither can drift from the other.
+   *
+   * The two sessions below delegate to this through explicit getters rather than
+   * spreading it. Spreading looks tidier and is wrong: `{ ...base }` evaluates
+   * `stopped` once and copies the value, so `stop()` would set a variable the
+   * returned session no longer reads. The contract caught it, which is the
+   * clearest argument for the contract there has been.
+   */
+  const openSession = (spec: SessionSpec) => {
+    sessions += 1;
+    const id = newSessionId();
+    let stopped = false;
+
+    return {
+      id,
+      tier: spec.tier,
+      get stopped(): boolean {
+        return stopped;
+      },
+      async stop(): Promise<void> {
+        stopped = true;
+      },
+      refuseIfStopped(): void {
+        if (!stopped) return;
+        throw new AppError('this session has stopped and will not take another turn', {
+          category: 'provider',
+          code: 'session-stopped',
+          detail: { session: id },
+        });
+      },
+    };
+  };
+
   return {
     name: 'fake',
     get turns() {
@@ -106,56 +141,53 @@ export function fakeRunner(script: FakeScript = {}): FakeRunner {
     },
 
     async start(spec: SessionSpec): Promise<ModelSession> {
-      sessions += 1;
-      const id = newSessionId();
-      let stopped = false;
-
-      const refuseIfStopped = (): void => {
-        if (!stopped) return;
-        throw new AppError('this session has stopped and will not take another turn', {
-          category: 'provider',
-          code: 'session-stopped',
-          detail: { session: id },
-        });
-      };
-
+      const base = openSession(spec);
       return {
-        id,
-        tier: spec.tier,
-        get stopped() {
-          return stopped;
+        id: base.id,
+        tier: base.tier,
+        get stopped(): boolean {
+          return base.stopped;
         },
-
+        stop: () => base.stop(),
         async turn(prompt: string): Promise<TurnResult> {
-          refuseIfStopped();
-          turns.push({ session: id, prompt, structured: false });
+          base.refuseIfStopped();
+          turns.push({ session: base.id, prompt, structured: false });
           return { text: nextText(), usage };
         },
+      };
+    },
 
-        async turnStructured<Value>(
-          prompt: string,
-          schema: ZodType<Value>,
-        ): Promise<StructuredTurnResult<Value>> {
-          refuseIfStopped();
-          turns.push({ session: id, prompt, structured: true });
+    async startStructured<Value>(
+      spec: SessionSpec,
+      schema: ZodType<Value>,
+    ): Promise<StructuredSession<Value>> {
+      const base = openSession(spec);
+      return {
+        id: base.id,
+        tier: base.tier,
+        get stopped(): boolean {
+          return base.stopped;
+        },
+        stop: () => base.stop(),
+        async turn(prompt: string): Promise<StructuredTurnResult<Value>> {
+          base.refuseIfStopped();
+          turns.push({ session: base.id, prompt, structured: true });
 
           const parsed = schema.safeParse(nextValue(prompt));
           if (!parsed.success) {
             // ADR-0015: a response that fails validation is a handled error
-            // path, never coerced into looking valid.
+            // path, never coerced into looking valid. The rejected value is
+            // deliberately absent from the detail — it is whatever the model
+            // said, which may be whatever the operator typed.
             throw new AppError('the model returned a value the schema rejected', {
               category: 'provider',
               code: 'structured-output-invalid',
-              detail: { session: id, issues: parsed.error.issues.length },
+              detail: { session: base.id, issues: parsed.error.issues.length },
               cause: parsed.error,
             });
           }
 
           return { text: '', value: parsed.data, usage };
-        },
-
-        async stop(): Promise<void> {
-          stopped = true;
         },
       };
     },

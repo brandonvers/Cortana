@@ -100,6 +100,16 @@ the port through nothing more than convenience.
 be relaxed for the real adapter is a finding about the port, and gets recorded as
 one rather than accommodated quietly.
 
+> **This happened, before a line of the adapter was written.** Reading the
+> provider's own interface showed that the output format is a parameter of the
+> call that opens a session, with no control method to change it and no
+> per-message field carrying one: a session is prose or structured for its whole
+> life. The port had put both on one session, which is the obvious design and not
+> one every adapter can implement, so the port changed rather than the adapter
+> working around it. What that leaves open — an agent needing both would now need
+> two sessions, at 263 MB each — is recorded in `packages/runner/src/port.ts` for
+> M3 to answer, not guessed at here.
+
 **3. Structured output and turn budgets.** ADR-0015 already carries the measured
 requirement, including the one that has teeth: a budget tuned against `sonnet`
 **breaks silently when the same agent is downgraded to `haiku`**, and the symptom
