@@ -1,7 +1,7 @@
 import { isAppError } from '@cortana/core';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { rateLimitWarningFrom } from './adapter.ts';
+import { isRateLimitWarning, rateLimitStateFrom } from './adapter.ts';
 import {
   accountUsageFrom,
   DEFAULT_MODELS,
@@ -256,7 +256,7 @@ describe('the rate-limit warning the provider pushes', () => {
   };
 
   it('carries the window, the threshold, and when it resets', () => {
-    const warning = rateLimitWarningFrom(event);
+    const warning = rateLimitStateFrom(event);
 
     expect(warning?.status).toBe('allowed_warning');
     expect(warning?.window).toBe('seven_day');
@@ -273,19 +273,19 @@ describe('the rate-limit warning the provider pushes', () => {
     // must be divided; this event reports 0.87 and must not be. Dividing here
     // would be the factor of a hundred spike 0013 warned about, applied in the
     // one place it does not belong.
-    expect(rateLimitWarningFrom(event)?.utilization).toBe(0.87);
+    expect(rateLimitStateFrom(event)?.utilization).toBe(0.87);
   });
 
   it('ignores messages that are not rate-limit events', () => {
-    expect(rateLimitWarningFrom({ type: 'result', subtype: 'success' })).toBeNull();
-    expect(rateLimitWarningFrom({ type: 'rate_limit_event' })).toBeNull();
+    expect(rateLimitStateFrom({ type: 'result', subtype: 'success' })).toBeNull();
+    expect(rateLimitStateFrom({ type: 'rate_limit_event' })).toBeNull();
   });
 
   it('refuses a status it does not recognise rather than passing it on', () => {
     // A status this code has never seen is a signal it cannot interpret, and
     // forwarding it would let a governor act on a word nobody has defined.
     expect(
-      rateLimitWarningFrom({
+      rateLimitStateFrom({
         type: 'rate_limit_event',
         rate_limit_info: { status: 'something_new_in_a_later_release' },
       }),
@@ -293,7 +293,7 @@ describe('the rate-limit warning the provider pushes', () => {
   });
 
   it('tolerates a warning that says less than the full shape', () => {
-    const sparse = rateLimitWarningFrom({
+    const sparse = rateLimitStateFrom({
       type: 'rate_limit_event',
       rate_limit_info: { status: 'rejected' },
     });
@@ -301,5 +301,29 @@ describe('the rate-limit warning the provider pushes', () => {
     expect(sparse?.status).toBe('rejected');
     expect(sparse?.window).toBeNull();
     expect(sparse?.resetsAt).toBeNull();
+  });
+});
+
+describe('telling headroom from a warning', () => {
+  const state = (status: string, extra: Record<string, unknown> = {}) =>
+    rateLimitStateFrom({ type: 'rate_limit_event', rate_limit_info: { status, ...extra } });
+
+  it('does not call an ordinary allowed state a warning', () => {
+    // The first live observation on the deployment target was exactly this:
+    // five_hour, status allowed, and no utilization attached at all. Treating it
+    // as a warning mislabels it for anything reading the stream, and a governor
+    // acting on it would be acting on nothing.
+    const allowed = state('allowed', { rateLimitType: 'five_hour' });
+
+    expect(allowed?.window).toBe('five_hour');
+    expect(allowed?.utilization).toBeNull();
+    expect(allowed && isRateLimitWarning(allowed)).toBe(false);
+  });
+
+  it('calls the two that mean something warnings', () => {
+    for (const status of ['allowed_warning', 'rejected']) {
+      const it = state(status);
+      expect(it && isRateLimitWarning(it)).toBe(true);
+    }
   });
 });
