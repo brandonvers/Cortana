@@ -93,6 +93,14 @@ What the discussion needs to cover:
 - **What it is for**, in one sentence
 - **Licence** — must be compatible with MIT. **AGPL, SSPL, and source-available licences are
   disqualifying.** Check, do not assume.
+
+  There is exactly one exception, and it is narrow, named, and argued for in
+  [ADR-0020](docs/adr/0020-the-provider-sdk-is-a-peer-dependency.md): the AI provider's SDK,
+  which is proprietary and which [ADR-0001](docs/adr/0001-model-access-behind-a-port.md) makes
+  unavoidable. It is an **optional peer dependency the user installs themselves**, so that
+  accepting the provider's terms is their decision rather than a side effect of installing
+  this. Nothing else gets that treatment, and a second request for it should be read as a
+  reason to look for a different dependency.
 - **Maintenance health** — last release, open issue trend, how many people can merge
 - **Native module implications** — anything requiring compilation must build on Linux x86_64
   and macOS arm64

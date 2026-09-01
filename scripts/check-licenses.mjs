@@ -149,6 +149,17 @@ function declaredDependencies() {
     } catch {
       continue; // Not every directory under packages/ is a package.
     }
+    // An optional peer is declared but deliberately not installed — ADR-0020
+    // makes the provider SDK one, so that acquiring proprietary terms is the
+    // user's act rather than a side effect of installing this. It is genuinely
+    // absent from the tree, so requiring the licence listing to account for it
+    // would fail the build over a package nobody has.
+    const optionalPeers = new Set(
+      Object.entries(manifest.peerDependenciesMeta ?? {})
+        .filter(([, meta]) => meta?.optional === true)
+        .map(([name]) => name),
+    );
+
     for (const field of [
       'dependencies',
       'devDependencies',
@@ -159,6 +170,7 @@ function declaredDependencies() {
         // A workspace package is this repository, not a third party, and has no
         // entry in the licence listing.
         if (String(range).startsWith('workspace:')) continue;
+        if (field === 'peerDependencies' && optionalPeers.has(name)) continue;
         declared.add(name);
       }
     }
