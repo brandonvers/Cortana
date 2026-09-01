@@ -33,6 +33,13 @@ export type ErrorCategory =
   | 'storage'
   /** A bounded wait ran out. Says nothing about whether the work succeeded. */
   | 'timeout'
+  /**
+   * The model provider refused, failed, or answered in a way the port cannot
+   * use. Not the operator's fault and not necessarily ours: the provider is a
+   * system nobody here controls, which is the whole reason ADR-0001 puts a port
+   * in front of it.
+   */
+  | 'provider'
   /** A defect in this code. Not the operator's fault and not recoverable here. */
   | 'internal';
 

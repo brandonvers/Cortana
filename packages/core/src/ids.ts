@@ -33,12 +33,20 @@ export type Uuid = Brand<string, 'Uuid'>;
 /**
  * Identifies one running daemon process.
  *
- * This is the only concrete identifier M1 defines, because it is the only one
- * M1 creates. Agents, jobs, messages and memories get theirs in the milestone
- * that builds them; inventing their types now would be guessing at schemas
- * nobody has written.
+ * Identifiers appear here in the milestone that first creates one, rather than
+ * being invented ahead of a schema. M1 created this; M2 adds the session below.
  */
 export type InstanceId = Brand<string, 'InstanceId'>;
+
+/**
+ * Identifies one model session.
+ *
+ * A session is the expensive object in this system — spike 0003 measured 263 MB
+ * per idle one — so it has an identity rather than being an anonymous handle:
+ * the audit correlates a turn to the session that ran it, and an operator asking
+ * "which one cost that" needs the question to have an answer.
+ */
+export type SessionId = Brand<string, 'SessionId'>;
 
 const HEX = '0123456789abcdef';
 
@@ -106,4 +114,9 @@ export function timestampOf(id: Uuid): number | null {
 /** Mints the identifier for one running daemon process. */
 export function newInstanceId(now?: number): InstanceId {
   return uuidV7(now) as string as InstanceId;
+}
+
+/** Mints the identifier for one model session. */
+export function newSessionId(now?: number): SessionId {
+  return uuidV7(now) as string as SessionId;
 }
