@@ -59,8 +59,32 @@ export interface DetectionProbes {
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
-/** A TPM2 device, through the kernel's resource manager or directly. */
-const TPM_DEVICES = ['/dev/tpmrm0', '/dev/tpm0'];
+/**
+ * How to tell whether this machine has a TPM.
+ *
+ * The obvious answer — look for `/dev/tpmrm0` — is wrong under the unit file
+ * this project ships, and wrong in the direction that under-reports protection.
+ * `PrivateDevices=yes` gives the service a private `/dev` with a minimal set of
+ * nodes. Measured on the deployment target:
+ *
+ *   /dev under PrivateDevices=yes:
+ *     char core fd full hugepages log mqueue null ptmx pts random shm
+ *
+ * A TPM device node cannot appear there, so a hardened service on a machine with
+ * a TPM would report rung 2 and helpfully suggest "adding a TPM2 device moves
+ * this to rung 1" while sitting on one. ADR-0018 forbids exactly that
+ * understatement.
+ *
+ * `/sys` is not affected by `PrivateDevices`, and the same measurement confirmed
+ * `/sys/class/tpm` is visible inside the sandbox. So sysfs is the primary source,
+ * with the device nodes kept as a secondary for contexts without it.
+ *
+ * **The entry, not the directory.** `/sys/class/tpm` exists on a machine with no
+ * TPM at all — that came out of the same measurement — so checking for the
+ * directory would report a TPM on every Linux box in existence. There is a test
+ * holding that distinction.
+ */
+const TPM_EVIDENCE = ['/sys/class/tpm/tpm0', '/sys/class/tpm/tpmrm0', '/dev/tpmrm0', '/dev/tpm0'];
 /** The conventional marker for "this machine was booted by systemd". */
 const SYSTEMD_MARKER = '/run/systemd/system';
 const SYSTEMD_CREDS = ['/usr/bin/systemd-creds', '/bin/systemd-creds'];
@@ -71,7 +95,7 @@ export function detectSecretProtection(probes: DetectionProbes): SecretProtectio
 
   const systemdBooted = probes.exists(SYSTEMD_MARKER);
   const systemdCreds = any(SYSTEMD_CREDS);
-  const tpm = any(TPM_DEVICES);
+  const tpm = any(TPM_EVIDENCE);
   // systemd sets this for every unit it starts. It separates "systemd is on this
   // machine" from "we were started by it", which is what decides whether
   // credentials can be passed in at all.

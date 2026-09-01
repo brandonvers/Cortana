@@ -211,7 +211,12 @@ export async function startKernel(options: KernelOptions): Promise<RunningKernel
   }
 
   const startedAt = clock.now();
-  log.info('kernel started', { instanceId, version: options.version });
+  // Only the identifier. The version is on every line already — the daemon puts
+  // it in the logger's base — and repeating it here emitted the same key twice
+  // in one JSON object, which some parsers resolve to the first value and some
+  // to the last. It is also recorded durably in the instances row, which is the
+  // copy that answers "which build did that" after the fact.
+  log.info('kernel started', { instanceId });
   await bus.publish('kernel.started', {
     instanceId,
     version: options.version,

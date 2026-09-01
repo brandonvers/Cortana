@@ -18,18 +18,44 @@ function machine(
 }
 
 const SYSTEMD = ['/run/systemd/system', '/usr/bin/systemd-creds'];
+const TPM_SYSFS = '/sys/class/tpm/tpm0';
 
 describe('rung 1 — sealed to hardware', () => {
   it('is reached on Linux with systemd and a TPM', () => {
-    const result = detectSecretProtection(machine('linux', [...SYSTEMD, '/dev/tpmrm0']));
+    const result = detectSecretProtection(machine('linux', [...SYSTEMD, TPM_SYSFS]));
 
     expect(result.rung).toBe(1);
     expect(result.sealed).toBe(true);
     expect(result.keyLocation).toContain('TPM');
   });
 
-  it('accepts the device without the kernel resource manager', () => {
-    expect(detectSecretProtection(machine('linux', [...SYSTEMD, '/dev/tpm0'])).rung).toBe(1);
+  it.each(['/sys/class/tpm/tpm0', '/sys/class/tpm/tpmrm0', '/dev/tpmrm0', '/dev/tpm0'])(
+    'accepts %s as evidence',
+    (path) => {
+      expect(detectSecretProtection(machine('linux', [...SYSTEMD, path])).rung).toBe(1);
+    },
+  );
+
+  it('finds the TPM where a hardened unit can still see it', () => {
+    // PrivateDevices=yes gives the service a private /dev with a minimal set of
+    // nodes, measured on the deployment target as: char core fd full hugepages
+    // log mqueue null ptmx pts random shm. A TPM node cannot appear there, so a
+    // service that looked only at /dev would report rung 2 while sitting on a
+    // TPM — the understatement ADR-0018 forbids. /sys is unaffected.
+    const hardened = machine('linux', [...SYSTEMD, TPM_SYSFS]);
+
+    expect(detectSecretProtection(hardened).rung).toBe(1);
+    expect(detectSecretProtection(hardened).sealed).toBe(true);
+  });
+
+  it('does not mistake the empty sysfs class directory for a TPM', () => {
+    // /sys/class/tpm exists on a machine with no TPM at all — that came out of
+    // the same measurement. Checking for the directory rather than an entry in
+    // it would report a TPM on every Linux box in existence.
+    const noTpm = machine('linux', [...SYSTEMD, '/sys/class/tpm']);
+
+    expect(detectSecretProtection(noTpm).rung).toBe(2);
+    expect(detectSecretProtection(noTpm).sealed).toBe(false);
   });
 
   it('says that secrets will not survive a hardware change', () => {
@@ -80,7 +106,7 @@ describe('rung 4 — nothing is encrypted', () => {
     ['Linux with systemd but no systemd-creds', machine('linux', ['/run/systemd/system'])],
     ['macOS without the security command', machine('darwin', [])],
     ['some other platform entirely', machine('freebsd', [])],
-    ['a TPM on a platform that cannot use it', machine('darwin', ['/dev/tpmrm0'])],
+    ['a TPM on a platform that cannot use it', machine('darwin', [TPM_SYSFS])],
   ])('is reached on %s', (_name, probes) => {
     const result = detectSecretProtection(probes);
 
@@ -99,7 +125,7 @@ describe('rung 4 — nothing is encrypted', () => {
 describe('the ladder as a whole', () => {
   it('calls exactly one rung sealed', () => {
     const machines: [SecretRung, DetectionProbes][] = [
-      [1, machine('linux', [...SYSTEMD, '/dev/tpmrm0'])],
+      [1, machine('linux', [...SYSTEMD, TPM_SYSFS])],
       [2, machine('linux', SYSTEMD)],
       [3, machine('darwin', ['/usr/bin/security'])],
       [4, machine('linux', [])],

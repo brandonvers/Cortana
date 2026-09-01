@@ -32,10 +32,12 @@ import {
   startKernel,
 } from '@cortana/kernel';
 import { EXIT, type ExitCode } from './exit.ts';
-import { watchForStop } from './signals.ts';
+import { type EarlySignals, type SignalWatch, watchForStop } from './signals.ts';
 
 export interface DaemonOptions {
   readonly env?: NodeJS.ProcessEnv;
+  /** Signals caught by `bin.ts` before this module finished loading. */
+  readonly early?: EarlySignals;
   readonly version?: string;
   /** For tests: an emitter standing in for the process's signals. */
   readonly signalSource?: NodeJS.EventEmitter;
@@ -113,6 +115,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<ExitCode> 
   const errors = options.destination ?? process.stderr;
 
   let logger: Logger;
+  let watch: SignalWatch | null = null;
   let kernel: RunningKernel;
   try {
     const loaded = loadConfig(env);
@@ -125,22 +128,38 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<ExitCode> 
       file: loaded.file ?? '(defaults only)',
       dataDir: loaded.config.dataDir,
     });
+
+    // Before the kernel starts, not after. Starting it opens a database and runs
+    // migrations, which was measured at over a hundred milliseconds — and until
+    // a handler is installed, a signal gets the default disposition, which is to
+    // end the process at once. A `systemctl restart` in quick succession would
+    // have killed the daemon outright: no drain, no clean stop, `stoppedAt` left
+    // null. The window cannot be closed entirely, because Node's own startup
+    // runs before any of this code, but it can be made as small as this file can
+    // make it.
+    //
+    // A signal arriving *during* startup is not lost. The promise below is
+    // already resolved by the time it is awaited, so the daemon finishes coming
+    // up and then shuts down cleanly, which costs a moment and keeps the
+    // guarantee.
+    watch = watchForStop({
+      logger,
+      onInsist: () => {
+        // Deliberately immediate. Someone signalling twice has said they would
+        // rather have the process gone than have it finish tidying up, and
+        // ADR-0017 makes that safe: everything acknowledged is already durable.
+        process.exit(EXIT.INSISTED);
+      },
+      ...(options.early ? { early: options.early } : {}),
+      ...(options.signalSource ? { process: options.signalSource } : {}),
+    });
+
     announceSecretProtection(logger, probeThisMachine(existsSync, env));
     kernel = await startKernel({ config: loaded.config, logger, version });
   } catch (error) {
+    watch?.dispose();
     return reportStartupFailure(error, errors);
   }
-
-  const watch = watchForStop({
-    logger,
-    onInsist: () => {
-      // Deliberately immediate. Someone signalling twice has said they would
-      // rather have the process gone than have it finish tidying up, and
-      // ADR-0017 makes that safe: everything acknowledged is already durable.
-      process.exit(EXIT.INSISTED);
-    },
-    ...(options.signalSource ? { process: options.signalSource } : {}),
-  });
 
   try {
     const { reason } = await watch.requested;
