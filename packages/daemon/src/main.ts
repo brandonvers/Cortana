@@ -19,11 +19,18 @@
  * wait, and is honoured immediately.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '@cortana/config';
 import { isAppError, type Logger } from '@cortana/core';
-import { createLogger, type RunningKernel, startKernel } from '@cortana/kernel';
+import {
+  createLogger,
+  type DetectionProbes,
+  detectSecretProtection,
+  probeThisMachine,
+  type RunningKernel,
+  startKernel,
+} from '@cortana/kernel';
 import { EXIT, type ExitCode } from './exit.ts';
 import { watchForStop } from './signals.ts';
 
@@ -69,6 +76,37 @@ function reportStartupFailure(error: unknown, destination: NodeJS.WritableStream
   return EXIT.INTERNAL;
 }
 
+/**
+ * Says what a credential on this machine would be worth.
+ *
+ * ADR-0018 requires that every rung below the first is announced at boot rather
+ * than reached silently, and this is that. It is reported before anything else
+ * happens because it is most useful to an operator *before* they put a
+ * credential anywhere.
+ *
+ * Only the bottom rung warns. "Announced" is not the same as "alarming": a
+ * development machine on the Keychain and a server on a host key are both
+ * working as designed, and a line that cries wolf every boot is a line people
+ * stop reading. Rung 4 is different — there, nothing is encrypted at all.
+ */
+export function announceSecretProtection(logger: Logger, probes: DetectionProbes): void {
+  const protection = detectSecretProtection(probes);
+  const fields = {
+    rung: protection.rung,
+    mechanism: protection.mechanism,
+    sealed: protection.sealed,
+    keyLocation: protection.keyLocation,
+    detail: protection.detail,
+    ...protection.evidence,
+  };
+
+  if (protection.rung === 4) {
+    logger.warn('credentials on this machine would not be encrypted', fields);
+    return;
+  }
+  logger.info('credential protection available on this machine', fields);
+}
+
 export async function runDaemon(options: DaemonOptions = {}): Promise<ExitCode> {
   const env = options.env ?? process.env;
   const version = options.version ?? readVersion();
@@ -87,6 +125,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<ExitCode> 
       file: loaded.file ?? '(defaults only)',
       dataDir: loaded.config.dataDir,
     });
+    announceSecretProtection(logger, probeThisMachine(existsSync, env));
     kernel = await startKernel({ config: loaded.config, logger, version });
   } catch (error) {
     return reportStartupFailure(error, errors);

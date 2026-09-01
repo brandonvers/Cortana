@@ -2,9 +2,11 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { recordingLogger } from '@cortana/core/testing';
 import { instances, openStorage } from '@cortana/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EXIT } from './exit.ts';
+import { announceSecretProtection } from './main.ts';
 
 const BIN = join(import.meta.dirname, 'bin.ts');
 
@@ -195,5 +197,51 @@ describe('when the operator has made a mistake', () => {
 
     expect(await daemon.exit()).toBe(EXIT.START_FAILED);
     expect(daemon.output()).toContain(occupied);
+  });
+});
+
+describe('announcing what a credential here would be worth', () => {
+  const machine = (platform: NodeJS.Platform, present: readonly string[]) => ({
+    platform,
+    exists: (path: string) => present.includes(path),
+    env: {},
+  });
+
+  it('warns, and only warns, when nothing would be encrypted', () => {
+    // "Announced" is not the same as "alarming". A development machine on the
+    // Keychain and a server on a host key are both working as designed, and a
+    // line that cries wolf every boot is a line people stop reading. Rung 4 is
+    // different: there is no encryption there at all.
+    const log = recordingLogger();
+    announceSecretProtection(log, machine('linux', []));
+
+    expect(log.entries[0]?.level).toBe('warn');
+    expect(log.entries[0]?.message).toMatch(/would not be encrypted/);
+  });
+
+  it.each([
+    [
+      'sealed to a TPM',
+      machine('linux', ['/run/systemd/system', '/usr/bin/systemd-creds', '/dev/tpmrm0']),
+    ],
+    ['a host key', machine('linux', ['/run/systemd/system', '/usr/bin/systemd-creds'])],
+    ['the Keychain', machine('darwin', ['/usr/bin/security'])],
+  ])('announces %s without alarm', (_name, probes) => {
+    const log = recordingLogger();
+    announceSecretProtection(log, probes);
+
+    expect(log.entries[0]?.level).toBe('info');
+    expect(log.entries[0]?.fields['sealed']).toBeDefined();
+    expect(log.entries[0]?.fields['keyLocation']).toBeTruthy();
+  });
+
+  it('says so at boot, in the real process', async () => {
+    const daemon = start();
+    await daemon.waitFor('kernel started');
+
+    expect(daemon.output()).toMatch(/credential protection|would not be encrypted/);
+
+    daemon.child.kill('SIGTERM');
+    await daemon.exit();
   });
 });
