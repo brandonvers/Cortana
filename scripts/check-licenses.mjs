@@ -72,6 +72,19 @@ const UNKNOWN = [/^unknown$/i, /^unlicensed$/i, /^see licen[cs]e/i, /^custom/i, 
  */
 const ACKNOWLEDGED = [
   {
+    match: /^@anthropic-ai\/claude-agent-sdk(-|$)/,
+    licence: /^unknown$/i,
+    devOnly: true,
+    why:
+      'The AI provider\'s SDK, licensed "© Anthropic PBC. All rights reserved" — pnpm ' +
+      'reports that as Unknown because the package points at a URL rather than naming a ' +
+      'licence. ADR-0020 records the whole argument: ADR-0001 makes it unavoidable and ' +
+      'CONTRIBUTING would otherwise disqualify it, so it is an optional peer dependency ' +
+      'the user installs, and a devDependency here only so the adapter typechecks. A ' +
+      'development dependency is neither redistributed nor acquired by a user, and the ' +
+      'devOnly check below is what holds that true rather than this sentence.',
+  },
+  {
     match: /^lightningcss(-|$)/,
     licence: /^MPL-2\.0$/,
     devOnly: true,
@@ -343,7 +356,7 @@ if (failed) {
 }
 
 if (accepted.length > 0) {
-  console.log('Copyleft present and previously accepted:');
+  console.log('Present and previously accepted, with a recorded reason:');
   for (const entry of accepted) console.log(`  ${entry.license}  ${entry.name}`);
 }
 
