@@ -1,6 +1,6 @@
 # M1 — the kernel skeleton
 
-**Status:** Accepted — not started
+**Status:** In progress — one item outstanding
 **Date:** 2026-08-23
 **Version target:** `0.1.0-alpha` → `0.1.0`
 
@@ -29,25 +29,37 @@ state, writes to it safely, says what it did, and stops without losing anything.
 [RELEASING §2](../RELEASING.md) makes this a gate rather than a summary, so it is
 written before the work instead of after it.
 
-- [ ] The daemon starts on a machine with no configuration, and either runs on
+- [x] The daemon starts on a machine with no configuration, and either runs on
       defaults or **exits naming the setting that is missing** — never a stack
       trace
-- [ ] Migrations apply at boot; running them twice is a no-op; a database written
+- [x] Migrations apply at boot; running them twice is a no-op; a database written
       by a newer build is **refused rather than half-migrated**
-- [ ] Every write goes through one serialised writer, and **concurrent callers
+- [x] Every write goes through one serialised writer, and **concurrent callers
       are exercised by a test** — which [spike 0005](../spikes/0005-durable-bus.md)
       explicitly did not do
-- [ ] `SIGTERM` drains and exits `0` within a bounded time. `SIGKILL` loses
+- [x] `SIGTERM` drains and exits `0` within a bounded time. `SIGKILL` loses
       nothing that was acknowledged, **proven by a test that kills a real child
       process and reopens the file** — not by assertion
-- [ ] Logs are structured and levelled, and **a secret placed in configuration
+- [x] Logs are structured and levelled, and **a secret placed in configuration
       never appears in one**, verified by a test rather than by review
-- [ ] The secret store **reports at boot which mechanism it is using**, so a
+- [x] The secret store **reports at boot which mechanism it is using**, so a
       degraded fallback is never silent
 - [ ] A systemd unit installs, starts on boot, and restarts on failure
-- [ ] **CI enforces the provider boundary** — step 0
-- [ ] CI green on `ubuntu-latest` and `macos-latest`, with the native module
+- [x] **CI enforces the provider boundary** — step 0
+- [x] CI green on `ubuntu-latest` and `macos-latest`, with the native module
       building on both
+
+**The outstanding one cannot be closed from a laptop.** The unit file exists and
+its settings are argued for, but "installs, starts on boot, restarts on failure"
+is a claim about a machine, and this project's standing rule is that a claim like
+that is measured rather than asserted. It is closed by installing the unit on the
+Debian server, rebooting it, and killing the process to watch it come back.
+
+Two things worth knowing before that run. The unit's `TimeoutStopSec=45` has to
+stay above the daemon's own shutdown deadline, or the graceful path is
+unreachable. And `MemoryDenyWriteExecute=yes` is deliberately absent: it is on
+every hardening checklist and stops Node from starting, because V8 compiles to
+machine code at runtime.
 
 ## The packages
 
