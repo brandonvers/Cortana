@@ -127,7 +127,7 @@ requirement, including the one that has teeth: a budget tuned against `sonnet`
 > The runaway a turn limit was standing in for is bounded by **cost** instead:
 > the adapter takes a `maxBudgetUsd` ceiling the provider enforces. A turn count
 > is a proxy that breaks per model; money is the thing that actually matters.
-> What the ceiling should default to is M5's question, not this one's.
+> What the ceiling should default to is M6's question, not this one's.
 
 **4. Audit.** Schema, the write path through M1's writer, and correlation. This is
 the step where "durable before acknowledged" gets its second user.
@@ -180,7 +180,7 @@ package declares its own, `drizzle.config.ts` collects them, and there is still
 [ADR-0010](../adr/0010-sqlite-storage.md) actually cares about: one database file,
 one transaction, one backup, one recovery story.
 
-What this buys is that M4 and M5 are additions rather than edits to a file
+What this buys is that M5 and M6 are additions rather than edits to a file
 everyone shares, and that `@cortana/audit` owns its own shape. What it costs is
 that the schema is no longer readable in one place, which is a real loss and the
 reason the alternative was close.
@@ -222,10 +222,10 @@ the code exists.
 |---|---|
 | The conversation loop, chat, approvals, the policy engine | M3 |
 | Report aggregation and delivery ([ADR-0014](../adr/0014-kernel-mediated-reports.md)) | M3 |
-| Memory, embeddings, retrieval | M4 |
-| **The budget governor.** M2 makes the meter readable; deciding what to do about it is M5 | M5 |
-| The scheduler and the proactive gate | M5 |
-| Dashboard, ops CLI, packaging | M6 |
+| Memory, embeddings, retrieval | M5 |
+| **The budget governor.** M2 makes the meter readable; deciding what to do about it is M6 | M6 |
+| The scheduler and the proactive gate | M6 |
+| Dashboard, ops CLI, packaging | M7 |
 | Quarantine of untrusted content ([ADR-0007](../adr/0007-quarantine-untrusted-content.md)) | M3 — it needs a conversation to quarantine |
 
 ## Dependencies
