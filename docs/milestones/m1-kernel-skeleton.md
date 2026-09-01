@@ -1,6 +1,6 @@
 # M1 — the kernel skeleton
 
-**Status:** In progress — one item outstanding
+**Status:** Done — every item verified
 **Date:** 2026-08-23
 **Version target:** `0.1.0-alpha` → `0.1.0`
 
@@ -44,18 +44,47 @@ written before the work instead of after it.
       never appears in one**, verified by a test rather than by review
 - [x] The secret store **reports at boot which mechanism it is using**, so a
       degraded fallback is never silent
-- [ ] A systemd unit installs, starts on boot, and restarts on failure
+- [x] A systemd unit installs, starts on boot, and restarts on failure
 - [x] **CI enforces the provider boundary** — step 0
 - [x] CI green on `ubuntu-latest` and `macos-latest`, with the native module
       building on both
 
-**The outstanding one cannot be closed from a laptop.** The unit file exists and
-its settings are argued for, but "installs, starts on boot, restarts on failure"
-is a claim about a machine, and this project's standing rule is that a claim like
-that is measured rather than asserted. It is closed by installing the unit on the
-Debian server, rebooting it, and killing the process to watch it come back.
+### What the last one cost, and what it taught
 
-Two things worth knowing before that run. The unit's `TimeoutStopSec=45` has to
+"Installs, starts on boot, restarts on failure" is a claim about a machine, so it
+was measured on the Debian server on **2026-09-01** rather than asserted here.
+It holds: the unit starts, survives a reboot, and comes back from a `SIGKILL`
+with `NRestarts=1`. The `instances` table read afterwards is the clearest summary
+of the whole milestone —
+
+```text
+08:42:30 -> 08:42:37   clean stop
+08:42:38 -> NULL       killed with SIGKILL; still null, and always will be
+08:47:10 -> 09:01:08   ran until the reboot, which stops services with SIGTERM
+09:02:14 -> NULL       the run that came up after it
+```
+
+— because `stoppedAt` means exactly what it was designed to mean, on real
+hardware, with a real kill.
+
+**Two of the steps were discovered by the service failing**, and both belong to
+M6 rather than here:
+
+- **Where Node comes from.** A version manager keeps it under `$HOME`, which
+  `ProtectHome=yes` hides from the service; the failure is `env: 'node': No such
+  file or directory`, which reads like a PATH problem and is not one. Debian 13's
+  own package is too old for the type stripping that
+  [ADR-0009](../adr/0009-typescript-7-type-stripping.md) relies on. It was worked
+  around by copying a known-good Node to
+  `/opt/node`, which gets no security updates — fine for a verification, not for a
+  release.
+- **What reaches the target.** Copying a checkout is not enough: the first
+  attempt failed with `Cannot find package '@cortana/config'`, because the source
+  had never had an install run in it. Deployment currently requires a full
+  `pnpm install` on the machine, development dependencies and native build
+  included, which is more than a self-hosted project should ask of a stranger.
+
+Two settings are worth knowing before repeating it. `TimeoutStopSec=45` has to
 stay above the daemon's own shutdown deadline, or the graceful path is
 unreachable. And `MemoryDenyWriteExecute=yes` is deliberately absent: it is on
 every hardening checklist and stops Node from starting, because V8 compiles to

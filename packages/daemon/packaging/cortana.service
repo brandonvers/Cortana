@@ -6,9 +6,34 @@
 # because several settings here are the other half of decisions already made in
 # the code.
 #
+# Installing it, as actually performed on the deployment target rather than as
+# imagined. Two of these steps were discovered by the service failing:
+#
+#   1. Node must live somewhere ProtectHome=yes does not hide. A version manager
+#      keeps it under $HOME, and the service cannot see it there — the failure is
+#      "env: 'node': No such file or directory", which reads like a PATH problem
+#      and is not one. Debian 13's own package is too old for the type stripping
+#      ADR-0009 relies on, so the version has to come from somewhere else.
+#
+#   2. The code has to be somewhere else too, for the same reason, and it needs
+#      its dependencies installed *there*. Copying a checkout is not enough: the
+#      first attempt failed with "Cannot find package '@cortana/config'" because
+#      the source had never had an install run in it.
+#
+#   sudo cp -a "$HOME/.nvm/versions/node/v24.19.0" /opt/node   # or any Node >= 24.12
+#   sudo mkdir -p /opt/cortana && sudo cp -a <checkout>/. /opt/cortana/
+#   sudo chown -R "$USER":"$USER" /opt/cortana
+#   (cd /opt/cortana && pnpm install --frozen-lockfile)
+#   sudo chown -R root:root /opt/cortana && sudo chmod -R a+rX /opt/cortana
+#
 #   sudo useradd --system --home-dir /var/lib/cortana --shell /usr/sbin/nologin cortana
 #   sudo cp cortana.service /etc/systemd/system/
+#   sudo sed -i "s|^ExecStart=.*|ExecStart=/opt/node/bin/node /opt/cortana/packages/daemon/src/bin.ts|" \
+#       /etc/systemd/system/cortana.service
 #   sudo systemctl daemon-reload && sudo systemctl enable --now cortana
+#
+# Verified on Debian 13 on 2026-09-01: starts, survives a reboot, and comes back
+# after SIGKILL with NRestarts=1. Making that pleasant is M6's problem.
 
 [Unit]
 Description=Cortana
@@ -52,6 +77,15 @@ StandardError=journal
 # reach, and none of them interferes with what this one does.
 NoNewPrivileges=yes
 PrivateTmp=yes
+
+# This gives the service a private /dev holding twelve nodes — measured here as
+# char core fd full hugepages log mqueue null ptmx pts random shm. Keeping it
+# means a TPM device node is never visible to this process, which is fine: the
+# daemon never talks to the TPM, since systemd decrypts credentials before the
+# service starts. It does have to *know* whether one is present, in order to
+# report honestly what a credential here is worth, and that check therefore looks
+# at /sys/class/tpm rather than at /dev — /sys is unaffected by this setting, and
+# that was measured rather than assumed. See packages/kernel/src/secrets.ts.
 PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=yes

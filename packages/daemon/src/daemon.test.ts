@@ -222,7 +222,7 @@ describe('announcing what a credential here would be worth', () => {
   it.each([
     [
       'sealed to a TPM',
-      machine('linux', ['/run/systemd/system', '/usr/bin/systemd-creds', '/dev/tpmrm0']),
+      machine('linux', ['/run/systemd/system', '/usr/bin/systemd-creds', '/sys/class/tpm/tpm0']),
     ],
     ['a host key', machine('linux', ['/run/systemd/system', '/usr/bin/systemd-creds'])],
     ['the Keychain', machine('darwin', ['/usr/bin/security'])],
