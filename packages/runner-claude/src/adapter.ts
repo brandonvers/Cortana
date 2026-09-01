@@ -26,11 +26,12 @@ import type {
   StructuredTurnResult,
   TurnResult,
 } from '@cortana/runner';
-import { type ZodType, z } from 'zod';
+import type { ZodType } from 'zod';
 import {
   accountUsageFrom,
   DEFAULT_MODELS,
   failureFrom,
+  jsonSchemaFor,
   type ProviderResult,
   totalCostFrom,
   usageFrom,
@@ -142,7 +143,7 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
         strictMcpConfig: true,
         mcpServers: {},
         ...(open.schema
-          ? { outputFormat: { type: 'json_schema', schema: z.toJSONSchema(open.schema) } }
+          ? { outputFormat: { type: 'json_schema', schema: jsonSchemaFor(open.schema) } }
           : {}),
         ...(options.maxBudgetUsd === undefined ? {} : { maxBudgetUsd: options.maxBudgetUsd }),
       },

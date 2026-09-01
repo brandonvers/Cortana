@@ -16,6 +16,7 @@
 
 import { AppError } from '@cortana/core';
 import type { AccountUsage, ModelTier, TurnUsage, UsageWindow } from '@cortana/runner';
+import { type ZodType, z } from 'zod';
 
 /**
  * Which model each tier means.
@@ -31,6 +32,37 @@ export const DEFAULT_MODELS: Readonly<Record<ModelTier, string>> = {
   balanced: 'sonnet',
   deep: 'opus',
 };
+
+/**
+ * A Zod schema in the form the provider will accept.
+ *
+ * The `$schema` key has to go, and finding that out is what the hand-run contract
+ * is for. Against the real provider the structured case failed with:
+ *
+ *   --json-schema is not a valid JSON Schema: no schema with key or ref
+ *   "https://json-schema.org/draft/2020-12/schema"
+ *
+ * The validator on the other side has no meta-schema registered under that URL,
+ * so a pointer to it is fatal. Nothing was wrong with the schema itself.
+ *
+ * **The dialect stays 2020-12 even so**, because the alternative that omits
+ * `$schema` on its own — targeting OpenAPI 3.0 — changes what a nullable field
+ * looks like:
+ *
+ *   2020-12      {"type": ["string", "null"]}
+ *   openapi-3.0  {"anyOf": [{"type":"string"}, {"type":"string","nullable":true,"enum":[null]}]}
+ *
+ * [Spike 0009](../../../docs/spikes/0009-structured-output.md) measured that
+ * making absence representable is what stops a model inventing a value for a
+ * field it has nothing to put in — "the same prompt and field with
+ * `type: ['string','null']` returned `null` where the non-nullable version
+ * returned a value". Trading that for a shorter fix would trade a measured
+ * property for a convenient one.
+ */
+export function jsonSchemaFor(schema: ZodType<unknown>): Record<string, unknown> {
+  const { $schema: _dialect, ...rest } = z.toJSONSchema(schema) as Record<string, unknown>;
+  return rest;
+}
 
 /** A result message, narrowed to what this adapter reads. */
 export interface ProviderResult {
