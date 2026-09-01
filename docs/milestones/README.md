@@ -12,7 +12,7 @@ is corrected in place and the correction says what changed.
 | | Milestone | Plan |
 |---|---|---|
 | M1 | Kernel skeleton | [m1-kernel-skeleton.md](m1-kernel-skeleton.md) |
-| M2 | Model runner port, audit, cost | not written |
+| M2 | Model runner port, audit, cost | [m2-model-runner.md](m2-model-runner.md) |
 | M3 | Chat, conversation loop, approvals | not written |
 | M4 | Memory | not written — [blocked](../spikes/README.md#outstanding) |
 | M5 | Scheduler, durable jobs, budget governor | not written |
