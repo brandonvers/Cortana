@@ -1,0 +1,20 @@
+{
+  "name": "@cortana/runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The ModelRunner port, a second adapter, and the contract every adapter must satisfy. Knows nothing about any provider.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts",
+    "./contract": "./src/contract.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@cortana/core": "workspace:*",
+    "zod": "^4.5.4"
+  }
+}

@@ -77,6 +77,15 @@ importers:
         specifier: ^10.3.1
         version: 10.3.1
 
+  packages/runner:
+    dependencies:
+      '@cortana/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: ^4.5.4
+        version: 4.5.4
+
   packages/storage:
     dependencies:
       '@cortana/config':
