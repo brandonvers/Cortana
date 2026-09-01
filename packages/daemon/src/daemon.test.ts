@@ -1,12 +1,14 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Writable } from 'node:stream';
 import { recordingLogger } from '@cortana/core/testing';
 import { instances, openStorage } from '@cortana/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EXIT } from './exit.ts';
-import { announceSecretProtection } from './main.ts';
+import { announceSecretProtection, runDaemon } from './main.ts';
 
 const BIN = join(import.meta.dirname, 'bin.ts');
 
@@ -65,8 +67,13 @@ function start(env: Record<string, string> = {}): Started {
         if (Date.now() > deadline) {
           throw new Error(`waited ${timeoutMs}ms for "${fragment}". Output so far:\n${output}`);
         }
-        if (child.exitCode !== null) {
-          throw new Error(`exited ${child.exitCode} before "${fragment}" appeared:\n${output}`);
+        // signalCode as well as exitCode: a process killed by a signal has a
+        // null exit code, so checking only that turns "it was killed" into a
+        // five-second timeout with nothing in it to read. That is exactly how
+        // this suite reported a real defect on CI, and it cost a round trip.
+        if (child.exitCode !== null || child.signalCode !== null) {
+          const how = child.signalCode ?? `exit ${child.exitCode}`;
+          throw new Error(`the daemon died (${how}) before "${fragment}" appeared:\n${output}`);
         }
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
@@ -153,11 +160,81 @@ describe('stopping', () => {
     await daemon.waitFor('kernel started');
 
     daemon.child.kill('SIGHUP');
-    await daemon.waitFor('reloading configuration is not implemented');
+    await new Promise((resolve) => setTimeout(resolve, 250));
 
+    // The claim is that it survived, which is checked directly rather than by
+    // waiting for a log line to arrive — the line is asserted below, after a
+    // clean stop, so the test does not depend on when a lone write is flushed.
     expect(daemon.child.exitCode).toBeNull();
+    expect(daemon.child.signalCode).toBeNull();
+
     daemon.child.kill('SIGTERM');
     expect(await daemon.exit()).toBe(EXIT.OK);
+    expect(daemon.output()).toContain('reloading configuration is not implemented');
+  });
+});
+
+describe('a signal that arrives before the daemon can hear it', () => {
+  it('is honoured rather than lost', async () => {
+    // bin.ts installs placeholder handlers before importing anything heavy,
+    // because loading this daemon's module graph was measured at 325ms and
+    // until a handler exists a signal ends the process outright. What arrived
+    // in that window is handed over here.
+    //
+    // Driven directly rather than by timing a spawn: the handover is what needs
+    // proving, and a test that races the module loader would be measuring the
+    // machine it runs on.
+    const lines: string[] = [];
+    const sink = new Writable({
+      write(chunk, _encoding, done) {
+        lines.push(String(chunk));
+        done();
+      },
+    });
+
+    const code = await runDaemon({
+      env: {
+        HOME: join(root, 'home'),
+        XDG_CONFIG_HOME: join(root, 'no-config'),
+        CORTANA_DATA_DIR: join(root, 'state'),
+      },
+      early: { arrived: ['SIGTERM'], release: () => undefined },
+      signalSource: new EventEmitter(),
+      destination: sink,
+    });
+
+    expect(code).toBe(EXIT.OK);
+    expect(lines.join('')).toContain('stop requested before the daemon had finished starting');
+    expect(lines.join('')).toContain('stopped cleanly');
+  });
+
+  it('answers a hangup from that window without stopping', async () => {
+    const lines: string[] = [];
+    const sink = new Writable({
+      write(chunk, _encoding, done) {
+        lines.push(String(chunk));
+        done();
+      },
+    });
+    const emitter = new EventEmitter();
+
+    const run = runDaemon({
+      env: {
+        HOME: join(root, 'home'),
+        XDG_CONFIG_HOME: join(root, 'no-config'),
+        CORTANA_DATA_DIR: join(root, 'state'),
+      },
+      early: { arrived: ['SIGHUP'], release: () => undefined },
+      signalSource: emitter,
+      destination: sink,
+    });
+
+    // It must still be waiting: a hangup is not a stop.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(lines.join('')).toContain('reloading configuration is not implemented');
+    emitter.emit('SIGTERM');
+
+    expect(await run).toBe(EXIT.OK);
   });
 });
 

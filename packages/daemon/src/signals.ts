@@ -45,8 +45,20 @@ export interface SignalWatch {
   dispose(): void;
 }
 
+/**
+ * Signals that arrived before this module was even loaded, collected by the
+ * placeholder handlers in `bin.ts`. See the note there: the module graph takes
+ * long enough to load that the window is real.
+ */
+export interface EarlySignals {
+  readonly arrived: readonly StopSignal[];
+  /** Removes the placeholders, once the real handlers are in place. */
+  release(): void;
+}
+
 export interface SignalOptions {
   readonly logger: Logger;
+  readonly early?: EarlySignals;
   /**
    * What to do when a second signal arrives while the first is being honoured.
    * Separated so a test can observe it without ending the test runner.
@@ -104,6 +116,22 @@ export function watchForStop(options: SignalOptions): SignalWatch {
   };
   handlers.set('SIGHUP', hangup);
   emitter.on('SIGHUP', hangup);
+
+  // Real handlers are in place, so the placeholders can go. Released before the
+  // backlog is read, not after: a signal landing in between hits a real handler
+  // rather than falling into a gap.
+  options.early?.release();
+
+  for (const signal of options.early?.arrived ?? []) {
+    if (signal === 'SIGHUP') {
+      hangup();
+      continue;
+    }
+    if (already) continue;
+    already = true;
+    log.info('stop requested before the daemon had finished starting', { signal });
+    announce({ reason: signal });
+  }
 
   return {
     requested,
