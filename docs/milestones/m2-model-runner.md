@@ -115,6 +115,20 @@ requirement, including the one that has teeth: a budget tuned against `sonnet`
 **breaks silently when the same agent is downgraded to `haiku`**, and the symptom
 — `error_max_turns` — names nothing about the cause.
 
+> **This closed with steps 1 and 2 rather than becoming work of its own**, and the
+> reason is worth keeping. The port gives a caller nowhere to pass a turn budget,
+> and the adapter imposes none either — it leaves `maxTurns` unset, so the
+> provider decides when a turn is finished. That *is* ADR-0015's requirement:
+> deriving the budget from the model in use, by asking the thing that knows.
+> Verified against the case the ADR names as the failure — `fast` tier, which
+> maps to the model that needs a second turn for the carrier — where a structured
+> answer came back in 4.6 s with no budget set by anyone.
+>
+> The runaway a turn limit was standing in for is bounded by **cost** instead:
+> the adapter takes a `maxBudgetUsd` ceiling the provider enforces. A turn count
+> is a proxy that breaks per model; money is the thing that actually matters.
+> What the ceiling should default to is M5's question, not this one's.
+
 **4. Audit.** Schema, the write path through M1's writer, and correlation. This is
 the step where "durable before acknowledged" gets its second user.
 

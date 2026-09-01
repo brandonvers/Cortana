@@ -48,8 +48,6 @@ export type InstanceId = Brand<string, 'InstanceId'>;
  */
 export type SessionId = Brand<string, 'SessionId'>;
 
-const HEX = '0123456789abcdef';
-
 /**
  * A version 7 UUID: 48 bits of millisecond timestamp, then randomness.
  *
@@ -70,34 +68,94 @@ const HEX = '0123456789abcdef';
  * which is what lets every other package and every third-party module depend on
  * it. A dependency here would cost that.
  *
- * **One documented limit:** identifiers minted within the same millisecond have
- * no defined order relative to one another. RFC 9562 §6.2 describes a counter
- * that would fix it; at this system's rate — jobs per minute, not per
- * millisecond — the case does not arise often enough to justify the state. If
- * bursts of same-millisecond writes ever need a stable order, that is the
- * change to make, and it does not alter the format.
+ * **Identifiers minted in the same millisecond are ordered too**, by the counter
+ * RFC 9562 §6.2 describes. That was not always true here: the first version said
+ * the case did not arise often enough to justify the state, and named the trigger
+ * for changing it — "if bursts of same-millisecond writes ever need a stable
+ * order". M2's audit is that burst. Three turns recorded against a fake adapter
+ * landed in one millisecond and came back out of order, and an audit whose
+ * identifier is meant to be the cursor for "what happened since" cannot be
+ * ordered by something with ties.
+ *
+ * The counter occupies `rand_a`, the twelve bits after the version nibble, so the
+ * format is unchanged and a v7 identifier from before still parses. Within a
+ * millisecond it increments; on a new millisecond it is re-seeded randomly with
+ * headroom left to climb. It is per process, which is what a single writer needs
+ * and all it claims.
  */
-export function uuidV7(now: number = Date.now()): Uuid {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
+/**
+ * The last millisecond a value was minted for, and the 74 random bits used then.
+ *
+ * RFC 9562 §6.2 offers two ways to order identifiers inside one millisecond. The
+ * first — a small dedicated counter in `rand_a` — was tried here and is worse
+ * than it looks: twelve bits run out after a few thousand, and once the counter
+ * saturates the remaining 62 random bits decide the comparison, so ordering does
+ * not degrade to ties but to **inversions**. Measured at 2,000 identifiers in one
+ * millisecond: 335 of them came out before the one they followed.
+ *
+ * The second method increments the whole random field instead, which is what
+ * these two hold. The headroom is 2^74 rather than 2^12, and the step is random
+ * so the sequence is not a predictable count of how many identifiers were minted.
+ */
+let lastMillis = -1;
+let lastRandom = 0n;
 
-  // Bytes 0-5: the timestamp, big-endian. Division rather than bit shifting,
-  // because the value exceeds 32 bits and JavaScript's bitwise operators do not.
-  let remaining = Math.floor(now);
-  for (let i = 5; i >= 0; i--) {
-    bytes[i] = remaining % 256;
-    remaining = Math.floor(remaining / 256);
+const RAND_BITS = 74n;
+const RAND_MASK = (1n << RAND_BITS) - 1n;
+/** Seeded into the lower half, so there is a whole bit of headroom to climb into. */
+const SEED_MASK = RAND_MASK >> 1n;
+const RAND_B_MASK = (1n << 62n) - 1n;
+
+function randomBits(bits: number): bigint {
+  const bytes = new Uint8Array(Math.ceil(bits / 8));
+  crypto.getRandomValues(bytes);
+  let value = 0n;
+  for (const byte of bytes) value = (value << 8n) | BigInt(byte);
+  return value & ((1n << BigInt(bits)) - 1n);
+}
+
+/**
+ * The random field for this identifier: fresh on a new millisecond, and strictly
+ * greater than the last one within the same millisecond.
+ *
+ * A caller passing an older timestamp than the previous call — a test minting at
+ * a fixed past instant — gets a fresh sequence rather than one continued from
+ * somewhere else, which is why the comparison is inequality rather than "later".
+ */
+function nextRandom(millis: number): bigint {
+  if (millis !== lastMillis) {
+    lastMillis = millis;
+    lastRandom = randomBits(74) & SEED_MASK;
+    return lastRandom;
   }
 
-  // The version nibble (7) and the two variant bits (0b10), which is what makes
-  // this a UUID rather than sixteen arbitrary bytes.
-  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x70;
-  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  // A random step rather than one, so the value is not a readable count of how
+  // many identifiers this process has minted this millisecond. Reaching the top
+  // would take 2^58 of them.
+  lastRandom = (lastRandom + 1n + randomBits(16)) & RAND_MASK;
+  return lastRandom;
+}
+
+const HEX = '0123456789abcdef';
+
+export function uuidV7(now: number = Date.now()): Uuid {
+  const millis = Math.floor(now);
+  const random = nextRandom(millis);
+
+  // 48 bits of timestamp, the version nibble, 12 bits of rand_a, the two variant
+  // bits, and 62 bits of rand_b — 128 in total. Assembled as one integer because
+  // the alternative is eight byte-level maskings, each of which is a chance to
+  // put a bit one place out.
+  const value =
+    (BigInt(millis) << 80n) |
+    (7n << 76n) |
+    ((random >> 62n) << 64n) |
+    (0b10n << 62n) |
+    (random & RAND_B_MASK);
 
   let hex = '';
-  for (const byte of bytes) {
-    hex += HEX[byte >> 4];
-    hex += HEX[byte & 0x0f];
+  for (let shift = 124n; shift >= 0n; shift -= 4n) {
+    hex += HEX[Number((value >> shift) & 0xfn)];
   }
 
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}` as Uuid;

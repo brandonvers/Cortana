@@ -5,7 +5,7 @@ import { type Bus, createBus, type HandlerFailure } from './index.ts';
 interface TestEvents {
   'instance.started': { id: string; startedAt: number };
   'config.reloaded': { file: string | null };
-  'nothing.attached': void;
+  'nothing.attached': undefined;
 }
 
 function bus(): { bus: Bus<TestEvents>; failures: HandlerFailure[] } {
