@@ -6,6 +6,7 @@ import { Secret } from './secret.ts';
 const VALID = {
   dataDir: '/var/lib/cortana',
   log: { level: 'info' },
+  audit: { retentionDays: 90 },
   shutdown: { timeoutMs: 15_000 },
 };
 
@@ -97,5 +98,29 @@ describe('secretSchema', () => {
 
     expect(result.success).toBe(false);
     expect(JSON.stringify(result.error?.issues)).not.toContain('hunter2');
+  });
+});
+
+describe('audit retention', () => {
+  const withRetention = (retentionDays: unknown) =>
+    configSchema.safeParse({ ...VALID, audit: { retentionDays } }).success;
+
+  it('accepts zero, which ADR-0019 defines as keeping everything', () => {
+    // Zero has to be written down to take effect, which is the whole point of
+    // making it representable rather than treating an unset value as infinite.
+    expect(withRetention(0)).toBe(true);
+  });
+
+  it('accepts a working window', () => {
+    expect(withRetention(90)).toBe(true);
+    expect(withRetention(3_650)).toBe(true);
+  });
+
+  it('refuses a negative window and a decade-plus one', () => {
+    // A value past ten years is far likelier to be a typo than an intention,
+    // and this is a record of what an operator said to their own machine.
+    expect(withRetention(-1)).toBe(false);
+    expect(withRetention(3_651)).toBe(false);
+    expect(withRetention(1.5)).toBe(false);
   });
 });

@@ -39,16 +39,106 @@ import {
 
 const SDK_PACKAGE = '@anthropic-ai/claude-agent-sdk';
 
+/**
+ * A rate-limit warning the provider pushed, unasked.
+ *
+ * [Spike 0013](../../../docs/spikes/0013-usage-headroom.md) found this and
+ * called it the best result of that run: "the provider pushes a warning with the
+ * threshold that triggered it. The governor does not have to poll and does not
+ * have to invent its own thresholds: it is told when the account crosses one,
+ * which window, and when that window resets."
+ *
+ * It sits on the adapter's options rather than on the port because ADR-0001 says
+ * where a provider-specific convenience belongs: "inside the adapter", to be
+ * "simply absent under another one". If a second adapter turns out to push the
+ * same thing, that is when it earns a place in the port.
+ *
+ * `utilization` is already a fraction here. The endpoint reports `87` and this
+ * reports `0.87` — the asymmetry spike 0013 warned is "a factor of a hundred in
+ * a governor's arithmetic" — so it is passed through rather than divided, and
+ * this comment is why nobody should add a division later.
+ */
+export interface RateLimitWarning {
+  readonly status: 'allowed' | 'allowed_warning' | 'rejected';
+  /** Which window. The binding one is not always the short one. */
+  readonly window: string | null;
+  /** A fraction from 0 to 1, already on the port's scale. */
+  readonly utilization: number | null;
+  /** The threshold whose crossing caused the warning, when the provider says. */
+  readonly surpassedThreshold: number | null;
+  readonly resetsAt: Date | null;
+}
+
 export interface ClaudeRunnerOptions {
   /** Overrides the tier-to-model mapping. */
   readonly models?: Readonly<Record<ModelTier, string>>;
   /** A ceiling the provider enforces per session. Absent means none. */
   readonly maxBudgetUsd?: number;
   readonly logger?: Logger;
+  /**
+   * Called when the provider pushes a rate-limit warning during a turn.
+   *
+   * Without this the events are read off the stream and discarded, which is what
+   * this adapter did until the meaning of that was noticed: the provider is
+   * telling the system it is running out of headroom, and nobody is listening.
+   */
+  readonly onRateLimit?: (warning: RateLimitWarning) => void;
+  /**
+   * How long to wait for a turn before giving up on it.
+   *
+   * A failing session is contained by the error taxonomy — an `AppError` is not
+   * a crash — but a session that simply never answers is contained by nothing,
+   * and a kernel awaiting it waits for as long as the process lives.
+   *
+   * The default is deliberately generous. A turn can legitimately run for
+   * minutes when the model is working, and a deadline that cuts real work is
+   * worse than none: it turns a slow answer into a failure and invites someone
+   * to raise it until it stops mattering. Ten minutes is past anything observed
+   * — spike 0005's model turn was 11 seconds — and still finite.
+   */
+  readonly turnTimeoutMs?: number;
+  /**
+   * Where a conversation comes from. Defaults to the provider's own.
+   *
+   * This is a seam rather than a convenience. Everything in this file that is
+   * not translation is orchestration — a deadline, a stopped session, a stream
+   * that ends early — and none of it is checkable without something to stand in
+   * for the provider. It leaks nothing: `ProviderQuery` is declared here and
+   * names no provider type, which is the same reason the boundary check is
+   * satisfied by this file and by nothing else.
+   */
+  readonly openConversation?: (params: unknown) => ProviderQuery;
+}
+
+const DEFAULT_TURN_TIMEOUT_MS = 600_000;
+
+/** Narrows a pushed event into the shape above, or `null` if it is not one. */
+export function rateLimitWarningFrom(message: Record<string, unknown>): RateLimitWarning | null {
+  if (message['type'] !== 'rate_limit_event') return null;
+
+  const info = message['rate_limit_info'];
+  if (!info || typeof info !== 'object') return null;
+  const raw = info as Record<string, unknown>;
+
+  const status = raw['status'];
+  if (status !== 'allowed' && status !== 'allowed_warning' && status !== 'rejected') return null;
+
+  // resetsAt is epoch *seconds* here, unlike the endpoint's ISO string. Two
+  // representations of the same instant, a third of the way through one SDK.
+  const resets = typeof raw['resetsAt'] === 'number' ? new Date(raw['resetsAt'] * 1_000) : null;
+
+  return {
+    status,
+    window: typeof raw['rateLimitType'] === 'string' ? raw['rateLimitType'] : null,
+    utilization: typeof raw['utilization'] === 'number' ? raw['utilization'] : null,
+    surpassedThreshold:
+      typeof raw['surpassedThreshold'] === 'number' ? raw['surpassedThreshold'] : null,
+    resetsAt: resets && !Number.isNaN(resets.getTime()) ? resets : null,
+  };
 }
 
 /** The provider surface this adapter uses, named so the rest can stay untyped. */
-interface ProviderQuery extends AsyncIterable<Record<string, unknown>> {
+export interface ProviderQuery extends AsyncIterable<Record<string, unknown>> {
   close?: () => void;
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: () => Promise<
     Record<string, unknown>
@@ -119,12 +209,16 @@ interface OpenOptions {
 }
 
 export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Promise<ModelRunner> {
-  const { query } = await loadSdk();
+  const query = options.openConversation ?? (await loadSdk()).query;
   const models = options.models ?? DEFAULT_MODELS;
   const log = options.logger?.child({ component: 'runner-claude' });
 
   /** Sessions still open, so the account meter has somewhere to be asked. */
   const live = new Set<ProviderQuery>();
+
+  const timeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
+  // Monotonic, so a deadline is not moved by the clock being corrected under it.
+  const clock = () => performance.now();
 
   const open = (open: OpenOptions) => {
     const id = newSessionId();
@@ -152,6 +246,28 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
 
     const messages = conversation[Symbol.asyncIterator]();
 
+    const timers = new Set<NodeJS.Timeout>();
+    const clearTimers = () => {
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+    };
+
+    const giveUp = (): AppError => {
+      // Interrupting is a courtesy to the provider, not a condition of giving
+      // up: the caller is told either way, and a session that ignores an
+      // interrupt is exactly the session this deadline exists for.
+      try {
+        (conversation as { interrupt?: () => unknown }).interrupt?.();
+      } catch (error) {
+        log?.debug('interrupting a timed-out turn complained', { error: String(error) });
+      }
+      stopped = true;
+      return new AppError(
+        `the provider did not answer within ${timeoutMs} ms, and the session has been given up on`,
+        { category: 'timeout', code: 'turn-timed-out', detail: { session: id, timeoutMs } },
+      );
+    };
+
     const runTurn = async (prompt: string): Promise<{ result: ProviderResult }> => {
       if (stopped) {
         throw new AppError('this session has stopped and will not take another turn', {
@@ -162,8 +278,24 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
       }
 
       queue.push(prompt);
+      const deadline = clock() + timeoutMs;
+
       for (;;) {
-        const next = await messages.next();
+        const remaining = deadline - clock();
+        if (remaining <= 0) throw giveUp();
+
+        const next = await Promise.race([
+          messages.next(),
+          new Promise<'timed-out'>((resolve) => {
+            const timer = setTimeout(() => resolve('timed-out'), remaining);
+            // Not unref'd: a turn in flight is a reason for the process to stay
+            // alive, and letting the loop empty underneath it would end the
+            // daemon mid-answer.
+            timers.add(timer);
+          }),
+        ]);
+
+        if (next === 'timed-out') throw giveUp();
         if (next.done) {
           throw new AppError('the provider ended the session before answering', {
             category: 'provider',
@@ -171,10 +303,22 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
             detail: { session: id },
           });
         }
+        const warning = rateLimitWarningFrom(next.value);
+        if (warning) {
+          options.onRateLimit?.(warning);
+          log?.warn('the provider warned about rate limits', {
+            status: warning.status,
+            window: warning.window ?? '(unnamed)',
+            utilization: warning.utilization ?? -1,
+          });
+          continue;
+        }
+
         if (next.value['type'] !== 'result') continue;
 
         const result = next.value as ProviderResult;
         const failure = failureFrom(result);
+        clearTimers();
         if (failure) throw failure;
         return { result };
       }
@@ -195,6 +339,7 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
       async stop(): Promise<void> {
         if (stopped) return;
         stopped = true;
+        clearTimers();
         queue.close();
         live.delete(conversation);
         try {

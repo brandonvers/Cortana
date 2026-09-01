@@ -15,6 +15,7 @@ beforeEach(() => {
   config = {
     dataDir: join(root, 'state'),
     log: { level: 'info' },
+    audit: { retentionDays: 90 },
     shutdown: { timeoutMs: 5_000 },
   };
 });

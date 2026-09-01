@@ -1,6 +1,7 @@
 import { isAppError } from '@cortana/core';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { rateLimitWarningFrom } from './adapter.ts';
 import {
   accountUsageFrom,
   DEFAULT_MODELS,
@@ -234,5 +235,71 @@ describe('the JSON schema handed to the provider', () => {
   it('still closes the object, so a model cannot add fields nobody asked for', () => {
     expect(jsonSchemaFor(ANSWER)['additionalProperties']).toBe(false);
     expect(jsonSchemaFor(ANSWER)['required']).toEqual(['verdict', 'source']);
+  });
+});
+
+describe('the rate-limit warning the provider pushes', () => {
+  // Spike 0013 called this the best result of that run: the provider says when
+  // the account crosses a threshold, which window, and when it resets — so a
+  // governor need not poll or invent thresholds of its own. The adapter read
+  // these events off the stream and discarded them until that was noticed.
+  const event = {
+    type: 'rate_limit_event',
+    rate_limit_info: {
+      status: 'allowed_warning',
+      rateLimitType: 'seven_day',
+      utilization: 0.87,
+      surpassedThreshold: 0.75,
+      resetsAt: 1_787_065_200,
+      isUsingOverage: false,
+    },
+  };
+
+  it('carries the window, the threshold, and when it resets', () => {
+    const warning = rateLimitWarningFrom(event);
+
+    expect(warning?.status).toBe('allowed_warning');
+    expect(warning?.window).toBe('seven_day');
+    expect(warning?.surpassedThreshold).toBe(0.75);
+    // Cross-checks against spike 0013, which recorded the same account's
+    // seven-day window resetting at 2026-08-18T14:59:59 and the pushed event
+    // carrying resetsAt: 1787065200. Two representations of one instant, and
+    // this is the conversion between them.
+    expect(warning?.resetsAt?.toISOString()).toBe('2026-08-18T15:00:00.000Z');
+  });
+
+  it('passes the utilization through rather than dividing it', () => {
+    // The trap this comment exists to prevent. The usage endpoint reports 87 and
+    // must be divided; this event reports 0.87 and must not be. Dividing here
+    // would be the factor of a hundred spike 0013 warned about, applied in the
+    // one place it does not belong.
+    expect(rateLimitWarningFrom(event)?.utilization).toBe(0.87);
+  });
+
+  it('ignores messages that are not rate-limit events', () => {
+    expect(rateLimitWarningFrom({ type: 'result', subtype: 'success' })).toBeNull();
+    expect(rateLimitWarningFrom({ type: 'rate_limit_event' })).toBeNull();
+  });
+
+  it('refuses a status it does not recognise rather than passing it on', () => {
+    // A status this code has never seen is a signal it cannot interpret, and
+    // forwarding it would let a governor act on a word nobody has defined.
+    expect(
+      rateLimitWarningFrom({
+        type: 'rate_limit_event',
+        rate_limit_info: { status: 'something_new_in_a_later_release' },
+      }),
+    ).toBeNull();
+  });
+
+  it('tolerates a warning that says less than the full shape', () => {
+    const sparse = rateLimitWarningFrom({
+      type: 'rate_limit_event',
+      rate_limit_info: { status: 'rejected' },
+    });
+
+    expect(sparse?.status).toBe('rejected');
+    expect(sparse?.window).toBeNull();
+    expect(sparse?.resetsAt).toBeNull();
   });
 });

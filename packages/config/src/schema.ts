@@ -39,6 +39,23 @@ export const configSchema = z.strictObject({
     level: z.enum(LOG_LEVELS),
   }),
 
+  audit: z.strictObject({
+    /**
+     * How long a turn's record is kept.
+     *
+     * [ADR-0019](../../../docs/adr/0019-the-audit-stores-what-was-said.md) makes
+     * this a number rather than "forever", because unbounded retention is not a
+     * decision to keep everything — it is a decision to defer deletion to the day
+     * the disk fills, when it will be made in a hurry.
+     *
+     * Zero keeps everything, and has to be written down to take effect. The
+     * upper bound is ten years: a value past it is far likelier to be a typo
+     * than an intention, and this is a record of what an operator said to their
+     * own machine.
+     */
+    retentionDays: z.int().min(0).max(3_650),
+  }),
+
   shutdown: z.strictObject({
     /**
      * How long draining may take before the process stops waiting.

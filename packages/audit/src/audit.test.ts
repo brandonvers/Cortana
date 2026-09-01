@@ -14,6 +14,7 @@ import {
 import { desc } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { costSpread, summariseCost } from './costs.ts';
 import { auditedRunner } from './recorder.ts';
 import { DEFAULT_RETENTION_DAYS, expireAudit } from './retention.ts';
 import { auditTurns } from './schema.ts';
@@ -288,5 +289,111 @@ describe('what the table is, stated once', () => {
 
     const newestFirst = storage.db.select().from(auditTurns).orderBy(desc(auditTurns.id)).all();
     expect(newestFirst.map((r) => r.prompt)).toEqual(['third', 'second', 'first']);
+  });
+});
+
+describe('what can honestly be said about cost', () => {
+  async function record(costs: readonly (number | null)[]): Promise<void> {
+    for (const costUsd of costs) {
+      const runner = auditedRunner(
+        fakeRunner({
+          usage: { costUsd, cacheWriteTokens: costUsd && costUsd > 0.5 ? 110_428 : 0 },
+        }),
+        { writer, instanceId },
+      );
+      const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+      await session.turn('anything');
+    }
+  }
+
+  it('adds up what was reported and shows the spread instead of a mean', async () => {
+    // Spike 0009 repeated one identical call and measured $0.0201 and $0.6891 —
+    // 34× — on prompt-cache state alone, with what selects between the regimes
+    // unknown. A mean over that is a number with no referent: it reads as "a
+    // turn costs about this", and no turn costs about that.
+    await record([0.0201, 0.0212, 0.6891]);
+
+    const summary = summariseCost(storage);
+    expect(summary.turns).toBe(3);
+    expect(summary.totalUsd).toBeCloseTo(0.7304, 6);
+    expect(summary.cheapestUsd).toBeCloseTo(0.0201, 10);
+    expect(summary.dearestUsd).toBeCloseTo(0.6891, 10);
+    expect(summary).not.toHaveProperty('averageUsd');
+  });
+
+  it('makes the spread a number, so it is visible rather than rediscovered', async () => {
+    await record([0.0201, 0.6891]);
+
+    expect(costSpread(summariseCost(storage))).toBeCloseTo(34.28, 1);
+  });
+
+  it('has no spread to report when nothing reported a cost', async () => {
+    await record([null, null]);
+    const summary = summariseCost(storage);
+
+    expect(summary.turnsWithoutCost).toBe(2);
+    expect(summary.totalUsd).toBe(0);
+    expect(costSpread(summary)).toBeNull();
+  });
+
+  it('counts what it could not price rather than treating it as free', async () => {
+    // The port documents a missing figure as normal, so a total that silently
+    // spans fewer turns than it claims would be the misleading part.
+    await record([0.05, null, 0.05]);
+    const summary = summariseCost(storage);
+
+    expect(summary.turns).toBe(3);
+    expect(summary.turnsWithoutCost).toBe(1);
+    expect(summary.totalUsd).toBeCloseTo(0.1, 10);
+  });
+
+  it('keeps the cache counters that explain the spread', async () => {
+    await record([0.0201, 0.6891]);
+    const summary = summariseCost(storage);
+
+    expect(summary.cacheWriteTokens).toBe(110_428);
+    expect(summary.inputTokens).toBeGreaterThan(0);
+  });
+
+  it('counts failures without pricing them', async () => {
+    const runner = auditedRunner(fakeRunner({ values: [{ verdict: 'maybe' }] }), {
+      writer,
+      instanceId,
+    });
+    const session = await runner.startStructured({ tier: 'fast', systemPrompt: 'a' }, ANSWER);
+    await expect(session.turn('x')).rejects.toThrow();
+
+    const summary = summariseCost(storage);
+    expect(summary.turns).toBe(1);
+    expect(summary.failed).toBe(1);
+    expect(summary.turnsWithoutCost).toBe(1);
+  });
+
+  it('answers for a window rather than for everything', async () => {
+    const now = Date.parse('2026-09-01T12:00:00Z');
+    for (const [days, cost] of [
+      [10, 0.5],
+      [1, 0.25],
+    ] as const) {
+      const aged = auditedRunner(fakeRunner({ usage: { costUsd: cost } }), {
+        writer,
+        instanceId,
+        clock: manualClock(now - days * 86_400_000),
+      });
+      const session = await aged.start({ tier: 'fast', systemPrompt: 'a' });
+      await session.turn(`${days} days old`);
+    }
+
+    const week = summariseCost(storage, { since: new Date(now - 7 * 86_400_000) });
+    expect(week.turns).toBe(1);
+    expect(week.totalUsd).toBeCloseTo(0.25, 10);
+  });
+
+  it('is empty rather than broken when there is nothing to summarise', () => {
+    const summary = summariseCost(storage);
+
+    expect(summary.turns).toBe(0);
+    expect(summary.totalUsd).toBe(0);
+    expect(summary.cheapestUsd).toBeNull();
   });
 });
