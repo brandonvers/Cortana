@@ -1,5 +1,5 @@
-export type { ClaudeRunnerOptions } from './adapter.ts';
-export { createClaudeRunner } from './adapter.ts';
+export type { ClaudeRunnerOptions, ProviderQuery, RateLimitWarning } from './adapter.ts';
+export { createClaudeRunner, rateLimitWarningFrom } from './adapter.ts';
 export type { ProviderResult, ProviderUsagePayload } from './translate.ts';
 export {
   accountUsageFrom,

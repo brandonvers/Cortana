@@ -1,3 +1,5 @@
+export type { CostSummary, CostWindow } from './costs.ts';
+export { costSpread, summariseCost } from './costs.ts';
 export type { AuditOptions } from './recorder.ts';
 export { anonymousInstance, auditedRunner } from './recorder.ts';
 export type { ExpiryOptions, ExpiryReport } from './retention.ts';

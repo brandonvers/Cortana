@@ -55,6 +55,14 @@ const BINDINGS: readonly Binding[] = [
   { name: 'DATA_DIR', path: ['dataDir'] },
   { name: 'LOG_LEVEL', path: ['log', 'level'] },
   {
+    name: 'AUDIT_RETENTION_DAYS',
+    path: ['audit', 'retentionDays'],
+    parse: (raw) => {
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : raw;
+    },
+  },
+  {
     name: 'SHUTDOWN_TIMEOUT_MS',
     path: ['shutdown', 'timeoutMs'],
     parse: (raw) => {
@@ -98,6 +106,7 @@ function defaults(env: Env): Tree {
   return {
     dataDir: defaultDataDir(env),
     log: { level: 'info' },
+    audit: { retentionDays: 90 },
     shutdown: { timeoutMs: 15_000 },
   };
 }

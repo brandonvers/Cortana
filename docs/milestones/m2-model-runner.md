@@ -1,6 +1,6 @@
 # M2 — the model runner, audit, and cost
 
-**Status:** Accepted — not started
+**Status:** Done — every item verified
 **Date:** 2026-09-01
 **Version target:** `0.2.0`
 
@@ -25,25 +25,25 @@ made more interesting than "add up the numbers".
 
 ## Definition of done
 
-- [ ] A session can be started, given a turn, and stopped through the port, and
+- [x] A session can be started, given a turn, and stopped through the port, and
       **no package outside `@cortana/runner-claude` imports a provider type** —
       already enforced by `check:boundaries`, which has had nothing to catch
       until now
-- [ ] **One contract suite passes against both adapters.** The port is real when
+- [x] **One contract suite passes against both adapters.** The port is real when
       the same tests hold for the real one and a second one; until then it is a
       description of the first
-- [ ] Structured output is requested with a schema and **re-validated with Zod**;
+- [x] Structured output is requested with a schema and **re-validated with Zod**;
       a response that fails is a handled error path, never coerced into looking
       valid ([ADR-0015](../adr/0015-structured-output-at-the-model-boundary.md))
-- [ ] **Turn budgets are derived from the model in use**, with headroom for the
+- [x] **Turn budgets are derived from the model in use**, with headroom for the
       carrier turn, and a model change recomputes them rather than inheriting
-- [ ] **Every turn is durably recorded before its result reaches the caller**, and
+- [x] **Every turn is durably recorded before its result reaches the caller**, and
       the prompt, tool calls, result and cost share one identifier
-- [ ] Cost is recorded **as reported, with the cache counters that explain it**,
+- [x] Cost is recorded **as reported, with the cache counters that explain it**,
       and nothing in the interface presents a per-turn figure as stable
-- [ ] The account usage meter is readable, and **its absence is a normal state**
+- [x] The account usage meter is readable, and **its absence is a normal state**
       rather than an error
-- [ ] A session that dies is not a kernel that dies: a crashed or unresponsive
+- [x] A session that dies is not a kernel that dies: a crashed or unresponsive
       session is contained, recorded, and restartable
 
 ## The packages
