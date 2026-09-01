@@ -170,7 +170,7 @@ export interface ProviderUsagePayload {
  * produced, so nothing here enumerates them.
  */
 export function accountUsageFrom(payload: ProviderUsagePayload | null): AccountUsage | null {
-  if (!payload || payload.rate_limits_available !== true) return null;
+  if (payload?.rate_limits_available !== true) return null;
 
   const limits = payload.rate_limits;
   if (!limits || typeof limits !== 'object') return null;

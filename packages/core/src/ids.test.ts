@@ -74,6 +74,41 @@ describe('uuidV7', () => {
     expect(seen.size).toBe(5_000);
   });
 
+  it('orders identifiers minted within the same millisecond', () => {
+    // This was not always true, and the trigger for changing it was written
+    // down: "if bursts of same-millisecond writes ever need a stable order".
+    // M2's audit is that burst — three turns against a fake adapter landed in
+    // one millisecond and came back out of order, and an identifier meant to be
+    // the cursor for "what happened since" cannot be ordered by something with
+    // ties.
+    const ids = Array.from({ length: 20_000 }, () => uuidV7(1_700_000_000_000));
+
+    expect([...ids].sort()).toEqual(ids);
+    expect(new Set(ids).size).toBe(20_000);
+  });
+
+  it('does not degrade to inversions under a burst', () => {
+    // The first attempt used RFC 9562's small dedicated counter, twelve bits in
+    // rand_a. It runs out after a few thousand, and once it saturates the
+    // remaining 62 random bits decide the comparison — so ordering did not
+    // degrade to ties but to inversions: 335 of 2,000 came out before the one
+    // they followed. Incrementing the whole random field has 2^74 of headroom
+    // instead of 2^12.
+    const ids = Array.from({ length: 50_000 }, () => uuidV7(1_700_000_000_000));
+    const inversions = ids.filter((id, index) => index > 0 && id < (ids[index - 1] as string));
+
+    expect(inversions).toEqual([]);
+  });
+
+  it('starts a fresh sequence when asked for an older instant', () => {
+    // A test minting at a fixed past instant is a legitimate use, and it must
+    // not inherit a sequence from wherever the process had got to.
+    uuidV7(1_800_000_000_000);
+    const older = uuidV7(1_700_000_000_000);
+
+    expect(timestampOf(older)).toBe(1_700_000_000_000);
+  });
+
   it('reads the timestamp back as null from anything that is not a version 7 uuid', () => {
     const v4 = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d' as Uuid;
 

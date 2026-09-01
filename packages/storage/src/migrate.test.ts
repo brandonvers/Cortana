@@ -34,19 +34,22 @@ describe('migrateToLatest', () => {
 
     const result = migrateToLatest(storage);
 
-    expect(result.applied).toBe(1);
-    expect(result.total).toBe(1);
+    // Counted rather than hard-coded: every milestone that adds a table adds a
+    // migration, and a test asserting "one" would fail on each of them for no
+    // reason connected to what it is checking.
+    expect(result.applied).toBeGreaterThan(0);
+    expect(result.total).toBe(result.applied);
     expect(tableNames()).toContain('instances');
   });
 
   it('does nothing the second time', () => {
     // Every start after the first goes through this path, so "no-op" is the
     // common case rather than an edge one.
-    migrateToLatest(storage);
+    const first = migrateToLatest(storage);
     const again = migrateToLatest(storage);
 
     expect(again.applied).toBe(0);
-    expect(again.total).toBe(1);
+    expect(again.total).toBe(first.total);
   });
 
   it('is a no-op across a close and reopen', () => {
