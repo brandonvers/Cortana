@@ -1,4 +1,5 @@
 import { isAppError } from '@cortana/core';
+import { recordingLogger } from '@cortana/core/testing';
 import { describe, expect, it } from 'vitest';
 import { createClaudeRunner, type ProviderQuery } from './adapter.ts';
 
@@ -144,5 +145,47 @@ describe('a warning pushed mid-turn', () => {
 
     expect(seen).toEqual(['seven_day:0.87']);
     expect(result.text).toBe('answered anyway');
+  });
+});
+
+describe('what the log is told about rate limits', () => {
+  const runWith = async (status: string) => {
+    const logger = recordingLogger();
+    const runner = await createClaudeRunner({
+      logger,
+      openConversation: () =>
+        answers(
+          { type: 'rate_limit_event', rate_limit_info: { status, rateLimitType: 'five_hour' } },
+          success('fine'),
+        ),
+    });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    await session.turn('anything');
+    return logger;
+  };
+
+  it('does not warn about headroom', async () => {
+    // A log that calls every ordinary state a warning is a log people stop
+    // reading, and the provider pushes these at `allowed` routinely.
+    const logger = await runWith('allowed');
+
+    expect(logger.entries.map((e) => e.level)).not.toContain('warn');
+    expect(logger.entries.some((e) => e.level === 'debug')).toBe(true);
+  });
+
+  it('warns about the states that mean something', async () => {
+    const logger = await runWith('allowed_warning');
+
+    expect(logger.entries.some((e) => e.level === 'warn')).toBe(true);
+    expect(logger.text()).toContain('limiting this account');
+  });
+
+  it('leaves a missing utilization out rather than reporting a sentinel', async () => {
+    // The first live event carried none. A -1 in the field would be read as a
+    // number by whatever aggregates these later.
+    const logger = await runWith('allowed_warning');
+
+    expect(logger.text()).not.toContain('-1');
+    expect(logger.entries.at(-1)?.fields).not.toHaveProperty('utilization');
   });
 });

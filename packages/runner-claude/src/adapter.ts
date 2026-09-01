@@ -40,7 +40,7 @@ import {
 const SDK_PACKAGE = '@anthropic-ai/claude-agent-sdk';
 
 /**
- * A rate-limit warning the provider pushed, unasked.
+ * A rate-limit state the provider pushed, unasked.
  *
  * [Spike 0013](../../../docs/spikes/0013-usage-headroom.md) found this and
  * called it the best result of that run: "the provider pushes a warning with the
@@ -57,8 +57,16 @@ const SDK_PACKAGE = '@anthropic-ai/claude-agent-sdk';
  * reports `0.87` — the asymmetry spike 0013 warned is "a factor of a hundred in
  * a governor's arithmetic" — so it is passed through rather than divided, and
  * this comment is why nobody should add a division later.
+ *
+ * **It is a state, not a warning**, and the name was wrong until a run on the
+ * deployment target said so. The provider pushes these at `allowed` too — an
+ * ordinary "you are fine" — and the first live observation was exactly that:
+ * `five_hour`, with no utilization attached at all. Calling that a warning
+ * mislabels it for anything reading the stream, and logging it as one teaches
+ * people to stop reading the log. `isRateLimitWarning` below is the predicate
+ * for the cases that actually mean something.
  */
-export interface RateLimitWarning {
+export interface RateLimitState {
   readonly status: 'allowed' | 'allowed_warning' | 'rejected';
   /** Which window. The binding one is not always the short one. */
   readonly window: string | null;
@@ -76,13 +84,17 @@ export interface ClaudeRunnerOptions {
   readonly maxBudgetUsd?: number;
   readonly logger?: Logger;
   /**
-   * Called when the provider pushes a rate-limit warning during a turn.
+   * Called when the provider pushes rate-limit state during a turn.
+   *
+   * Every state, not only the alarming ones: a governor deciding whether to start
+   * expensive work wants to know the account is comfortable as much as it wants
+   * to know it is not. `isRateLimitWarning` separates them.
    *
    * Without this the events are read off the stream and discarded, which is what
    * this adapter did until the meaning of that was noticed: the provider is
-   * telling the system it is running out of headroom, and nobody is listening.
+   * telling the system where it stands, and nobody was listening.
    */
-  readonly onRateLimit?: (warning: RateLimitWarning) => void;
+  readonly onRateLimit?: (state: RateLimitState) => void;
   /**
    * How long to wait for a turn before giving up on it.
    *
@@ -112,8 +124,19 @@ export interface ClaudeRunnerOptions {
 
 const DEFAULT_TURN_TIMEOUT_MS = 600_000;
 
+/**
+ * Whether this state is one a governor should act on.
+ *
+ * `allowed` means there is headroom, which is worth recording and worth nobody's
+ * attention. The other two are the ones spike 0013 described the provider
+ * pushing "with the threshold that triggered it".
+ */
+export function isRateLimitWarning(state: RateLimitState): boolean {
+  return state.status !== 'allowed';
+}
+
 /** Narrows a pushed event into the shape above, or `null` if it is not one. */
-export function rateLimitWarningFrom(message: Record<string, unknown>): RateLimitWarning | null {
+export function rateLimitStateFrom(message: Record<string, unknown>): RateLimitState | null {
   if (message['type'] !== 'rate_limit_event') return null;
 
   const info = message['rate_limit_info'];
@@ -303,14 +326,21 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
             detail: { session: id },
           });
         }
-        const warning = rateLimitWarningFrom(next.value);
-        if (warning) {
-          options.onRateLimit?.(warning);
-          log?.warn('the provider warned about rate limits', {
-            status: warning.status,
-            window: warning.window ?? '(unnamed)',
-            utilization: warning.utilization ?? -1,
-          });
+        const state = rateLimitStateFrom(next.value);
+        if (state) {
+          options.onRateLimit?.(state);
+          const fields = {
+            status: state.status,
+            window: state.window ?? '(unnamed)',
+            // Absent rather than -1: the first live event carried no utilization
+            // at all, and a sentinel would be read as a number.
+            ...(state.utilization === null ? {} : { utilization: state.utilization }),
+            ...(state.surpassedThreshold === null
+              ? {}
+              : { surpassedThreshold: state.surpassedThreshold }),
+          };
+          if (isRateLimitWarning(state)) log?.warn('the provider is limiting this account', fields);
+          else log?.debug('the provider reported rate-limit headroom', fields);
           continue;
         }
 
