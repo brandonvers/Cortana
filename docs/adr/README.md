@@ -26,6 +26,7 @@ how settled questions stay settled.
 | [0016](0016-retrieval-starts-with-the-wake.md) | Retrieval starts when the message arrives, not when the model is ready | Proposed |
 | [0017](0017-durability-over-throughput.md) | `synchronous = FULL`, and durability is not traded for speed | Accepted |
 | [0018](0018-secrets-at-rest.md) | Secrets are sealed by the OS, and can never reach a log line | Accepted |
+| [0019](0019-the-audit-stores-what-was-said.md) | The audit stores what was said, and the documentation says so | Accepted |
 
 ## When to write one
 
