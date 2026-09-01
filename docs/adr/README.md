@@ -27,6 +27,7 @@ how settled questions stay settled.
 | [0017](0017-durability-over-throughput.md) | `synchronous = FULL`, and durability is not traded for speed | Accepted |
 | [0018](0018-secrets-at-rest.md) | Secrets are sealed by the OS, and can never reach a log line | Accepted |
 | [0019](0019-the-audit-stores-what-was-said.md) | The audit stores what was said, and the documentation says so | Accepted |
+| [0020](0020-the-provider-sdk-is-a-peer-dependency.md) | The provider SDK is a peer dependency the user installs | Accepted |
 
 ## When to write one
 
