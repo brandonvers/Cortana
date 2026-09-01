@@ -95,6 +95,12 @@ importers:
         specifier: ^10.3.1
         version: 10.3.1
 
+  packages/policy:
+    dependencies:
+      '@cortana/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/runner:
     dependencies:
       '@cortana/core':
@@ -109,6 +115,9 @@ importers:
       '@cortana/core':
         specifier: workspace:*
         version: link:../core
+      '@cortana/policy':
+        specifier: workspace:*
+        version: link:../policy
       '@cortana/runner':
         specifier: workspace:*
         version: link:../runner

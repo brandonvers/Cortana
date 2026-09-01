@@ -1,0 +1,17 @@
+{
+  "name": "@cortana/policy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "What a session is allowed to do, said once, in terms no provider owns.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@cortana/core": "workspace:*"
+  }
+}
