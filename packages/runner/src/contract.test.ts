@@ -21,7 +21,10 @@ describe('the ModelRunner contract, against the fake', () => {
       // no case.
       await contractCase.run(
         fakeRunner({
-          values: [{ verdict: 'yes', because: 'it has no divisors but one and itself' }],
+          values: [
+            { verdict: 'yes', because: 'it has no divisors but one and itself' },
+            { verdict: 'no', because: 'the second structured case needs one too' },
+          ],
           accountUsage: {
             subscription: 'pro',
             windows: {
@@ -37,7 +40,7 @@ describe('the ModelRunner contract, against the fake', () => {
   it('is not empty, and would say so', () => {
     // A contract suite that silently became a loop over nothing would pass
     // against every adapter including a broken one.
-    expect(modelRunnerContract().length).toBeGreaterThanOrEqual(8);
+    expect(modelRunnerContract().length).toBeGreaterThanOrEqual(10);
   });
 });
 
@@ -51,11 +54,11 @@ describe('what the contract cannot cover, covered here', () => {
     // return nonsense on demand, which is why this is here and not in the
     // contract.
     const runner = fakeRunner({ values: [{ verdict: 'maybe', because: '' }] });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.startStructured({ tier: 'fast', systemPrompt: 'a' }, ANSWER);
 
     // One call, one scripted value. Asking twice would consume the script and
     // then fail for the entirely different reason that nothing was left.
-    const caught = await session.turnStructured('anything', ANSWER).then(
+    const caught = await session.turn('anything').then(
       (value) => ({ ok: true as const, value }),
       (error: unknown) => ({ ok: false as const, error }),
     );
@@ -73,10 +76,10 @@ describe('what the contract cannot cover, covered here', () => {
     // preventing everywhere else.
     const secretish = 'sk-live-not-a-verdict';
     const runner = fakeRunner({ values: [{ verdict: secretish, because: 'x' }] });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.startStructured({ tier: 'fast', systemPrompt: 'a' }, ANSWER);
 
     try {
-      await session.turnStructured('anything', ANSWER);
+      await session.turn('anything');
     } catch (error) {
       expect(JSON.stringify(isAppError(error) ? error.detail : {})).not.toContain(secretish);
       expect((error as Error).message).not.toContain(secretish);
@@ -87,11 +90,9 @@ describe('what the contract cannot cover, covered here', () => {
     // A fake that made up a value satisfying any schema would let a test pass
     // without anyone deciding what the model was supposed to say.
     const runner = fakeRunner();
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.startStructured({ tier: 'fast', systemPrompt: 'a' }, ANSWER);
 
-    await expect(session.turnStructured('anything', ANSWER)).rejects.toThrow(
-      /nothing left scripted/,
-    );
+    await expect(session.turn('anything')).rejects.toThrow(/nothing left scripted/);
   });
 });
 

@@ -143,20 +143,46 @@ export function modelRunnerContract(): readonly ContractCase[] {
     },
 
     {
-      name: 'produces a value of the shape asked for, with no budget from the caller',
+      name: 'produces values of the shape asked for, with no budget from the caller',
       async run(runner) {
         // ADR-0015: the turn budget must be derived from the model in use, with
         // headroom for the carrier turn. The port gives the caller nowhere to
         // pass one, so an adapter that needed to be told could not pass this.
-        const session = await runner.start({ tier: 'fast', systemPrompt: 'Answer briefly.' });
-        const result = await session.turnStructured(
-          'Is seven a prime number? Answer with a verdict and a reason.',
+        const session = await runner.startStructured(
+          { tier: 'fast', systemPrompt: 'Answer briefly.' },
           ANSWER,
+        );
+        const result = await session.turn(
+          'Is seven a prime number? Answer with a verdict and a reason.',
         );
 
         assert.ok(['yes', 'no'].includes(result.value.verdict));
         assert.ok(result.value.because.length > 0);
         await session.stop();
+      },
+    },
+
+    {
+      name: 'gives a structured session the same identity and lifecycle as any other',
+      async run(runner) {
+        // The two kinds differ in what a turn returns and in nothing else. An
+        // adapter that implemented them as separate worlds would drift, and the
+        // kernel holds both through the same base.
+        const session = await runner.startStructured(
+          { tier: 'balanced', systemPrompt: 'Answer briefly.' },
+          ANSWER,
+        );
+
+        assert.equal(session.tier, 'balanced');
+        assert.equal(session.stopped, false);
+        await session.stop();
+        assert.equal(session.stopped, true);
+        await session.stop();
+
+        await assert.rejects(
+          () => session.turn('anything'),
+          (error: unknown) => isAppError(error) && error.category === 'provider',
+        );
       },
     },
 
