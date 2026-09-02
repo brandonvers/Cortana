@@ -21,8 +21,10 @@
  * this and what should happen next".
  *
  * The list is short on purpose: a category is added when something needs to
- * behave differently because of it, not in anticipation. `unavailable` and
- * `conflict` are the obvious next two and neither has a caller yet.
+ * behave differently because of it, not in anticipation. `unavailable` was added
+ * in M3 when a client that could not reach the daemon needed to say something
+ * other than "the configuration is wrong" or "this code is broken". `conflict`
+ * is the obvious next one and still has no caller.
  */
 export type ErrorCategory =
   /** The operator's configuration is wrong or incomplete. Fix it and restart. */
@@ -33,6 +35,13 @@ export type ErrorCategory =
   | 'storage'
   /** A bounded wait ran out. Says nothing about whether the work succeeded. */
   | 'timeout'
+  /**
+   * Something that should be there is not, and may be there later. A daemon
+   * that is not running, a socket with nobody behind it. Distinct from `config`
+   * because nobody has to edit anything, and from `internal` because nothing is
+   * broken.
+   */
+  | 'unavailable'
   /**
    * The model provider refused, failed, or answered in a way the port cannot
    * use. Not the operator's fault and not necessarily ours: the provider is a

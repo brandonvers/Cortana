@@ -1,0 +1,242 @@
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { isAppError } from '@cortana/core';
+import { recordingLogger } from '@cortana/core/testing';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { connect } from './client.ts';
+import { MAX_FRAME_BYTES, parseClientFrame } from './protocol.ts';
+import { type Channel, createChannel, type SayHandler, socketPathFor } from './server.ts';
+
+let root: string;
+let dataDir: string;
+let channel: Channel | null;
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'cortana-channel-'));
+  dataDir = join(root, 'state');
+  channel = null;
+});
+
+afterEach(async () => {
+  await channel?.stop();
+  rmSync(root, { recursive: true, force: true });
+});
+
+async function serve(onSay: SayHandler, options: { askTimeoutMs?: number } = {}) {
+  channel = createChannel({
+    dataDir,
+    onSay,
+    logger: recordingLogger(),
+    ...(options.askTimeoutMs === undefined ? {} : { askTimeoutMs: options.askTimeoutMs }),
+  });
+  await channel.start();
+  return channel;
+}
+
+describe('talking to it', () => {
+  it('answers what it was asked', async () => {
+    await serve(async (text) => `you said: ${text}`);
+    const client = await connect({ path: socketPathFor(dataDir), onAsk: () => false });
+
+    expect(await client.say('hello')).toBe('you said: hello');
+    client.close();
+  });
+
+  it('keeps replies matched to the right message', async () => {
+    // Two messages in flight at once, answered out of order. Without
+    // correlation the second reply would resolve the first caller.
+    await serve(async (text) => {
+      if (text === 'slow') await new Promise((resolve) => setTimeout(resolve, 60));
+      return `answer to ${text}`;
+    });
+    const client = await connect({ path: socketPathFor(dataDir), onAsk: () => false });
+
+    const [slow, quick] = await Promise.all([client.say('slow'), client.say('quick')]);
+
+    expect(slow).toBe('answer to slow');
+    expect(quick).toBe('answer to quick');
+    client.close();
+  });
+
+  it('reports a failed turn instead of dropping the caller', async () => {
+    await serve(async () => {
+      throw new Error('the model said no');
+    });
+    const client = await connect({ path: socketPathFor(dataDir), onAsk: () => false });
+
+    await expect(client.say('anything')).rejects.toThrow(/the model said no/);
+    client.close();
+  });
+});
+
+describe('asking before acting', () => {
+  it('puts the question to whoever is connected, and waits for it', async () => {
+    const asked: string[] = [];
+    await serve(async (_text, conversation) => {
+      const approved = await conversation.ask('Run rm -rf /tmp/x?', 'permitted, but confirmed');
+      return approved ? 'did it' : 'left it alone';
+    });
+    const client = await connect({
+      path: socketPathFor(dataDir),
+      onAsk: (question, because) => {
+        asked.push(`${question} (${because})`);
+        return true;
+      },
+    });
+
+    expect(await client.say('tidy up')).toBe('did it');
+    expect(asked).toEqual(['Run rm -rf /tmp/x? (permitted, but confirmed)']);
+    client.close();
+  });
+
+  it('takes no for an answer', async () => {
+    await serve(async (_text, conversation) =>
+      (await conversation.ask('Really?', 'because')) ? 'did it' : 'left it alone',
+    );
+    const client = await connect({ path: socketPathFor(dataDir), onAsk: () => false });
+
+    expect(await client.say('tidy up')).toBe('left it alone');
+    client.close();
+  });
+
+  it('treats an unanswered question as a refusal rather than waiting forever', async () => {
+    // M3's definition of done: an approval you never answer must not wedge the
+    // daemon. The safe answer to an unanswered question about doing something is
+    // no, and it has to arrive on its own.
+    await serve(
+      async (_text, conversation) =>
+        (await conversation.ask('Really?', 'because')) ? 'did it' : 'left it alone',
+      { askTimeoutMs: 60 },
+    );
+    const client = await connect({
+      path: socketPathFor(dataDir),
+      onAsk: () => new Promise<boolean>(() => undefined),
+    });
+
+    expect(await client.say('tidy up')).toBe('left it alone');
+    client.close();
+  });
+
+  it('treats a disconnection as a refusal too', async () => {
+    // The person who would have answered has gone. Waiting out the timeout
+    // would be waiting for someone who is not there.
+    let verdict: boolean | null = null;
+    await serve(
+      async (_text, conversation) => {
+        verdict = await conversation.ask('Really?', 'because');
+        return 'done';
+      },
+      { askTimeoutMs: 30_000 },
+    );
+
+    const client = await connect({
+      path: socketPathFor(dataDir),
+      onAsk: () => {
+        client.close();
+        return new Promise<boolean>(() => undefined);
+      },
+    });
+    const client2 = client;
+    void client2.say('tidy up').catch(() => undefined);
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(verdict).toBe(false);
+  });
+});
+
+describe('the socket itself', () => {
+  it('lives in the data directory, named after the product', async () => {
+    // ADR-0002 requires renaming to stay cheap, so the name is derived.
+    await serve(async () => 'ok');
+
+    expect(socketPathFor(dataDir)).toBe(join(dataDir, 'cortana.sock'));
+    expect(existsSync(socketPathFor(dataDir))).toBe(true);
+  });
+
+  it('is reachable only by its owner, and sits in a directory that is too', async () => {
+    // The directory is the actual control: between listen and chmod there is a
+    // moment where the socket has whatever the umask allows, and 0700 on the
+    // directory is what makes that moment uninteresting.
+    await serve(async () => 'ok');
+
+    expect(statSync(dataDir).mode & 0o777).toBe(0o700);
+    expect(statSync(socketPathFor(dataDir)).mode & 0o777).toBe(0o600);
+  });
+
+  it('cleans up after itself', async () => {
+    const served = await serve(async () => 'ok');
+    await served.stop();
+    channel = null;
+
+    expect(existsSync(socketPathFor(dataDir))).toBe(false);
+  });
+
+  it('takes over a socket left behind by a process that was killed', async () => {
+    // A SIGKILL leaves the file, and the next start would fail with EADDRINUSE
+    // on a socket nobody is listening to.
+    const path = socketPathFor(dataDir);
+    require('node:fs').mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    writeFileSync(path, '');
+
+    await serve(async () => 'ok');
+    const client = await connect({ path, onAsk: () => false });
+
+    expect(await client.say('hello')).toBe('ok');
+    client.close();
+  });
+
+  it('refuses to take over one that is still in use', async () => {
+    // Deleting blindly is how two daemons end up fighting over one path.
+    await serve(async () => 'ok');
+    const second = createChannel({ dataDir, onSay: async () => 'ok' });
+
+    await expect(second.start()).rejects.toThrow(/already listening/);
+  });
+
+  it('says so when there is nothing to connect to', async () => {
+    const failure = await connect({
+      path: join(dataDir, 'nothing.sock'),
+      onAsk: () => false,
+    }).catch((error: unknown) => error);
+
+    expect(isAppError(failure) && failure.category).toBe('unavailable');
+    expect(isAppError(failure) && failure.code).toBe('channel-unreachable');
+  });
+});
+
+describe('a line that is not a frame', () => {
+  it.each([
+    ['not JSON at all', 'reason'],
+    ['[1,2,3]', 'reason'],
+    ['{"type":"say"}', 'reason'],
+    ['{"id":"a","type":"say"}', 'reason'],
+    ['{"id":"a","type":"nonsense"}', 'reason'],
+  ])('is explained rather than thrown: %s', (line) => {
+    const parsed = parseClientFrame(line);
+    expect(parsed).toHaveProperty('reason');
+  });
+
+  it('does not close the connection over a typo', async () => {
+    // The other end is a person's terminal. A malformed line is far more likely
+    // to be a mistake than an attack, and the connection surviving is what lets
+    // them try again.
+    await serve(async (text) => `you said: ${text}`);
+    const client = await connect({ path: socketPathFor(dataDir), onAsk: () => false });
+
+    expect(await client.say('still here')).toBe('you said: still here');
+    client.close();
+  });
+
+  it('disconnects a client that never sends a newline', async () => {
+    // Without the limit, memory grows until something else on the machine dies.
+    await serve(async () => 'ok');
+    const raw = require('node:net').createConnection(socketPathFor(dataDir));
+    await new Promise((resolve) => raw.once('connect', resolve));
+
+    raw.write('x'.repeat(MAX_FRAME_BYTES + 1));
+    await new Promise((resolve) => raw.once('close', resolve));
+
+    expect(raw.destroyed).toBe(true);
+  });
+});

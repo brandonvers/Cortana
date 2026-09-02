@@ -1,0 +1,17 @@
+{
+  "name": "@cortana/channel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The local socket you talk to it through, its framing, and the client.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@cortana/core": "workspace:*"
+  }
+}
