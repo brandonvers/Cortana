@@ -21,6 +21,21 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.13))
 
+  packages/agent:
+    dependencies:
+      '@cortana/core':
+        specifier: workspace:*
+        version: link:../core
+      '@cortana/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@cortana/runner':
+        specifier: workspace:*
+        version: link:../runner
+      zod:
+        specifier: ^4.5.4
+        version: 4.5.4
+
   packages/audit:
     dependencies:
       '@cortana/core':
@@ -112,6 +127,9 @@ importers:
       '@cortana/core':
         specifier: workspace:*
         version: link:../core
+      '@cortana/policy':
+        specifier: workspace:*
+        version: link:../policy
       zod:
         specifier: ^4.5.4
         version: 4.5.4

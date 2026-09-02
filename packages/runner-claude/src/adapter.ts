@@ -27,6 +27,7 @@ import type {
   TurnResult,
 } from '@cortana/runner';
 import type { ZodType } from 'zod';
+import { settingsFor } from './settings.ts';
 import {
   accountUsageFrom,
   DEFAULT_MODELS,
@@ -249,16 +250,35 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
     let stopped = false;
     let totalCostUsd = 0;
 
+    // The profile becomes settings here and nowhere else. Until this line
+    // existed, `settingsFor` was correct, tested, and called by nothing: a
+    // session opened with every containment finding computed and then dropped
+    // on the floor. That is the fifth time in this repository something has
+    // looked enforced and was not, and it is why `orchestration.test.ts` asserts
+    // what reaches `query` rather than what `settingsFor` returns.
+    const settings = settingsFor(open.spec.profile);
+
     const conversation = query({
       prompt: queue,
       options: {
         model: models[open.spec.tier],
         systemPrompt: open.spec.systemPrompt,
-        settingSources: [],
+        // The permission rules go through the flag layer — the highest-priority
+        // *user-controlled* tier — rather than through `managedSettings`, which
+        // reads like the stronger choice and is not. Spike 0010 measured the
+        // SDK's managed tier being **dropped entirely** on a machine that has an
+        // admin-controlled managed-settings tier of its own, which would silently
+        // remove every deny rule below on exactly the managed machines where they
+        // matter most.
+        settings: { permissions: settings.permissions },
+        // The sandbox goes through the SDK's own option instead, because that is
+        // the channel spike 0010 measured carrying `failIfUnavailable` intact.
+        sandbox: settings.sandbox,
+        settingSources: settings.settingSources,
         // A session inherits the operator's MCP servers unless both are set —
         // measured in spike 0011 and not a default worth trusting.
-        strictMcpConfig: true,
-        mcpServers: {},
+        strictMcpConfig: settings.strictMcpConfig,
+        mcpServers: settings.mcpServers,
         ...(open.schema
           ? { outputFormat: { type: 'json_schema', schema: jsonSchemaFor(open.schema) } }
           : {}),

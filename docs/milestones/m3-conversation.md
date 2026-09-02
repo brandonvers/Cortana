@@ -49,8 +49,16 @@ can act.** Five spikes exist for it and none of their findings is optional.
 | Package | Owns | Depends on |
 |---|---|---|
 | `@cortana/policy` | Trust levels, permission rules, the decision a tool call gets, and the profile generator | `core`, `config` |
-| `@cortana/agent` | The one agent: its schema, its session, and the loop that runs a turn | `core`, `runner`, `policy`, `audit`, `bus` |
+| `@cortana/agent` | The one agent: its schema, its session, and the loop that runs a turn | `core`, `runner`, `policy` |
 | `@cortana/channel` | The local socket, its framing, and the client the ops CLI will grow out of | `core`, `config`, `bus` |
+
+That row said `audit` and `bus` as well when this plan was written, and step 3
+dropped both. **The audit wraps the runner**, so an agent handed an audited one
+records every turn while containing no line about auditing — and importing the
+audit here would let somebody build an agent over a bare runner and hold a
+conversation that was never written down. **The bus has nothing to carry**: M3
+has one agent and no subscribers, and a typed bus is exactly the thing that makes
+an event invented early expensive to rename later.
 
 `@cortana/policy` is separate from the agent because
 [ADR-0007](../adr/0007-quarantine-untrusted-content.md) puts the same rules in

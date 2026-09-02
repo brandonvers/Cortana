@@ -80,9 +80,30 @@ describe('the settings whose absence is silent', () => {
     // Spike 0010 measured this for the first time: without it a session whose
     // sandbox is unavailable runs anyway, uncontained and unannounced.
     expect(settings.sandbox['failIfUnavailable']).toBe(true);
-    expect(settingsFor({ ...WORKING, sandbox: 'optional' }).sandbox).not.toHaveProperty(
-      'failIfUnavailable',
+  });
+
+  it('says an optional sandbox is optional, rather than omitting the flag', () => {
+    // This test used to assert the opposite — that the key was absent for an
+    // optional profile — and it was right about the code and wrong about the
+    // effect. Spike 0010 measured this default depending on the channel that
+    // carries it: `true` through the SDK's sandbox option, `false` from a
+    // settings file. The adapter uses the first, so an omitted value made
+    // `optional` mean `required`, and the profile said nothing about why the
+    // session would not start.
+    expect(settingsFor({ ...WORKING, sandbox: 'optional' }).sandbox['failIfUnavailable']).toBe(
+      false,
     );
+  });
+
+  it('refuses a profile whose network denial nothing here can enforce', () => {
+    // A profile that denies the network and grants a shell has an egress path
+    // and a field claiming otherwise. The sandbox has settings for it and none
+    // has been measured, and an unmeasured security setting is worse than an
+    // absent one because it reads as a closed door.
+    expect(() => settingsFor({ ...WORKING, tools: ['Bash'], network: 'denied' })).toThrow(
+      /denies the network and grants Bash/,
+    );
+    expect(() => settingsFor({ ...WORKING, tools: ['Bash'], network: 'allowed' })).not.toThrow();
   });
 
   it('inherits no MCP servers', () => {

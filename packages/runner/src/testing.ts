@@ -17,6 +17,7 @@
  */
 
 import { AppError, newSessionId } from '@cortana/core';
+import type { Profile } from '@cortana/policy';
 import type { ZodType } from 'zod';
 import type {
   AccountUsage,
@@ -28,6 +29,34 @@ import type {
   TurnResult,
   TurnUsage,
 } from './port.ts';
+
+/**
+ * A profile for tests that are not about profiles.
+ *
+ * `SessionSpec.profile` is required, which means every test that opens a session
+ * now has to say something about containment even when containment is not what
+ * it is testing. Without a shared constant each of those tests would invent its
+ * own, they would drift, and one of them would eventually be permissive in a way
+ * nobody meant.
+ *
+ * It lives in the testing entry point rather than in `@cortana/policy` for the
+ * same reason the manual clock does: a permissive profile shipped from the
+ * policy package is a permissive profile that production code can reach for
+ * without anyone noticing. Importing it here has to be spelled out.
+ *
+ * It grants nothing. A test that needs a tool says so itself, so what a test
+ * session may do is visible in the test rather than inherited from here.
+ */
+export const TEST_PROFILE: Profile = {
+  name: 'test',
+  trust: 'system',
+  tools: [],
+  readable: [],
+  writable: [],
+  denyRead: [],
+  network: 'denied',
+  sandbox: 'none',
+};
 
 export interface RecordedTurn {
   readonly session: string;
@@ -55,6 +84,16 @@ export interface FakeRunner extends ModelRunner {
   /** Every turn asked of it, in order. */
   readonly turns: readonly RecordedTurn[];
   readonly sessions: number;
+  /**
+   * Every spec a session was opened with, in order.
+   *
+   * Here so that a caller which builds a spec — the agent does — can be checked
+   * on what it actually asked for. A profile that is computed correctly and then
+   * not passed on looks identical from outside, and that is the failure this
+   * repository has now found four times in checks that passed for the wrong
+   * reason.
+   */
+  readonly opened: readonly SessionSpec[];
 }
 
 const DEFAULT_USAGE: TurnUsage = {
@@ -67,6 +106,7 @@ const DEFAULT_USAGE: TurnUsage = {
 
 export function fakeRunner(script: FakeScript = {}): FakeRunner {
   const turns: RecordedTurn[] = [];
+  const opened: SessionSpec[] = [];
   let sessions = 0;
   let textIndex = 0;
   let valueIndex = 0;
@@ -108,6 +148,7 @@ export function fakeRunner(script: FakeScript = {}): FakeRunner {
    */
   const openSession = (spec: SessionSpec) => {
     sessions += 1;
+    opened.push(spec);
     const id = newSessionId();
     let stopped = false;
 
@@ -138,6 +179,9 @@ export function fakeRunner(script: FakeScript = {}): FakeRunner {
     },
     get sessions() {
       return sessions;
+    },
+    get opened() {
+      return opened;
     },
 
     async start(spec: SessionSpec): Promise<ModelSession> {

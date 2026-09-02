@@ -39,6 +39,7 @@
 
 import assert from 'node:assert/strict';
 import { isAppError } from '@cortana/core';
+import type { Profile } from '@cortana/policy';
 import { z } from 'zod';
 import { isModelTier, MODEL_TIERS, type ModelRunner } from './port.ts';
 
@@ -47,9 +48,65 @@ export interface ContractCase {
   run(runner: ModelRunner): Promise<void>;
 }
 
+/**
+ * What the contract's own sessions may do: nothing.
+ *
+ * Every case here is about talking, so a profile granting a tool would be
+ * granting it for no reason — and this file is run against a live provider by
+ * hand, on somebody's own machine, which is the worst place for a permission
+ * nobody needs.
+ *
+ * `sandbox: 'none'` rather than `'required'` is the one deliberate looseness,
+ * and it is about where this runs rather than what it does. A required sandbox
+ * makes the contract fail on a host without one — [spike 0010](../../../docs/spikes/0010-non-bash-containment.md)
+ * found `failIfUnavailable` doing exactly that, which is the behaviour it is for
+ * — and a contract that cannot run on the machine in front of you is a contract
+ * nobody runs. There is nothing to contain: the session has no tools.
+ */
+const CONTRACT_PROFILE: Profile = {
+  name: 'contract',
+  trust: 'system',
+  tools: [],
+  readable: [],
+  writable: [],
+  denyRead: [],
+  network: 'denied',
+  sandbox: 'none',
+};
+
 const ANSWER = z.object({
   verdict: z.enum(['yes', 'no']),
   because: z.string().min(1),
+});
+
+/**
+ * A shape with a list in it, and a field whose honest value is sometimes absent.
+ *
+ * The flat schema above says nothing about either, and both are what M3's agent
+ * actually sends: `{ reply, actions }` where an action's path is null when the
+ * call touches no path. Two reasons that is worth a case of its own.
+ *
+ * The first is precedent. The provider rejected the `$schema` key Zod emits, and
+ * nothing found it until this contract was run by hand against the real adapter
+ * — a schema feature that every test accepted and the provider did not. A nested
+ * array and a union type are the next two features to find out about, and
+ * finding out here costs one turn.
+ *
+ * The second is [ADR-0015](../../../docs/adr/0015-structured-output-at-the-model-boundary.md)'s
+ * measured remedy: a field that may legitimately have no value **must permit
+ * null**, or the model fills it because it cannot leave it empty. Zod renders
+ * that as `type: ["string", "null"]`, which is the spelling the ADR measured
+ * working. This case is where that stays true.
+ */
+const NESTED = z.object({
+  summary: z.string().min(1),
+  items: z.array(
+    z.object({
+      name: z.string().min(1),
+      /** Null is the right answer when the item has no note, and must be reachable. */
+      note: z.string().nullable(),
+    }),
+  ),
 });
 
 /**
@@ -71,7 +128,11 @@ export function modelRunnerContract(): readonly ContractCase[] {
       name: 'starts a session at the tier it was asked for',
       async run(runner) {
         for (const tier of MODEL_TIERS) {
-          const session = await runner.start({ tier, systemPrompt: 'You are terse.' });
+          const session = await runner.start({
+            tier,
+            systemPrompt: 'You are terse.',
+            profile: CONTRACT_PROFILE,
+          });
           assert.equal(session.tier, tier, `asked for ${tier}`);
           assert.ok(isModelTier(session.tier));
           await session.stop();
@@ -82,8 +143,16 @@ export function modelRunnerContract(): readonly ContractCase[] {
     {
       name: 'gives every session its own identity',
       async run(runner) {
-        const one = await runner.start({ tier: 'fast', systemPrompt: 'a' });
-        const two = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+        const one = await runner.start({
+          tier: 'fast',
+          systemPrompt: 'a',
+          profile: CONTRACT_PROFILE,
+        });
+        const two = await runner.start({
+          tier: 'fast',
+          systemPrompt: 'a',
+          profile: CONTRACT_PROFILE,
+        });
 
         assert.notEqual(one.id, two.id, 'two sessions must not share an identity');
         await one.stop();
@@ -94,7 +163,11 @@ export function modelRunnerContract(): readonly ContractCase[] {
     {
       name: 'keeps a session identity stable across turns',
       async run(runner) {
-        const session = await runner.start({ tier: 'fast', systemPrompt: 'Answer briefly.' });
+        const session = await runner.start({
+          tier: 'fast',
+          systemPrompt: 'Answer briefly.',
+          profile: CONTRACT_PROFILE,
+        });
         const before = session.id;
         await session.turn('Say hello.');
         await session.turn('Say hello again.');
@@ -107,7 +180,11 @@ export function modelRunnerContract(): readonly ContractCase[] {
     {
       name: 'answers a prose turn with text',
       async run(runner) {
-        const session = await runner.start({ tier: 'fast', systemPrompt: 'Answer briefly.' });
+        const session = await runner.start({
+          tier: 'fast',
+          systemPrompt: 'Answer briefly.',
+          profile: CONTRACT_PROFILE,
+        });
         const result = await session.turn('Reply with a single word.');
 
         assert.equal(typeof result.text, 'string');
@@ -119,7 +196,11 @@ export function modelRunnerContract(): readonly ContractCase[] {
     {
       name: 'reports usage that can be added up and explained',
       async run(runner) {
-        const session = await runner.start({ tier: 'fast', systemPrompt: 'Answer briefly.' });
+        const session = await runner.start({
+          tier: 'fast',
+          systemPrompt: 'Answer briefly.',
+          profile: CONTRACT_PROFILE,
+        });
         const { usage } = await session.turn('Reply with a single word.');
 
         for (const [field, value] of Object.entries({
@@ -149,7 +230,7 @@ export function modelRunnerContract(): readonly ContractCase[] {
         // headroom for the carrier turn. The port gives the caller nowhere to
         // pass one, so an adapter that needed to be told could not pass this.
         const session = await runner.startStructured(
-          { tier: 'fast', systemPrompt: 'Answer briefly.' },
+          { tier: 'fast', systemPrompt: 'Answer briefly.', profile: CONTRACT_PROFILE },
           ANSWER,
         );
         const result = await session.turn(
@@ -163,13 +244,58 @@ export function modelRunnerContract(): readonly ContractCase[] {
     },
 
     {
+      name: 'produces a nested shape, with an absent value left absent',
+      async run(runner) {
+        const session = await runner.startStructured(
+          {
+            tier: 'fast',
+            systemPrompt: 'Answer from what you are given and invent nothing.',
+            profile: CONTRACT_PROFILE,
+          },
+          NESTED,
+        );
+        const result = await session.turn(
+          'Two items. "alpha" has the note "first". "beta" has no note at all. ' +
+            'Summarise them in one sentence.',
+        );
+
+        assert.equal(typeof result.value.summary, 'string');
+        assert.equal(result.value.items.length, 2, 'the list survived the crossing');
+        for (const item of result.value.items) {
+          assert.ok(item.name.length > 0);
+          assert.ok(
+            item.note === null || typeof item.note === 'string',
+            'note is a string or null, and both are already guaranteed by validation',
+          );
+        }
+
+        // The claim being checked is that null is *reachable*, not that the model
+        // is truthful — schema-validity is not truth-validity, which ADR-0015
+        // says in as many words. A model that writes a note for beta has told a
+        // small lie; a port that cannot represent the absence has a defect. Only
+        // the second is this contract's business, and it is asserted rather than
+        // hoped for because the ADR measured a non-nullable field being filled
+        // precisely because it could not be left empty.
+        const beta = result.value.items.find((item) => item.name.toLowerCase().includes('beta'));
+        if (beta !== undefined) {
+          assert.ok(
+            beta.note === null || beta.note.length > 0,
+            'an empty string is neither a note nor an absence, and means the union collapsed',
+          );
+        }
+
+        await session.stop();
+      },
+    },
+
+    {
       name: 'gives a structured session the same identity and lifecycle as any other',
       async run(runner) {
         // The two kinds differ in what a turn returns and in nothing else. An
         // adapter that implemented them as separate worlds would drift, and the
         // kernel holds both through the same base.
         const session = await runner.startStructured(
-          { tier: 'balanced', systemPrompt: 'Answer briefly.' },
+          { tier: 'balanced', systemPrompt: 'Answer briefly.', profile: CONTRACT_PROFILE },
           ANSWER,
         );
 
@@ -189,7 +315,11 @@ export function modelRunnerContract(): readonly ContractCase[] {
     {
       name: 'refuses a turn once the session has stopped',
       async run(runner) {
-        const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+        const session = await runner.start({
+          tier: 'fast',
+          systemPrompt: 'a',
+          profile: CONTRACT_PROFILE,
+        });
         await session.stop();
 
         assert.equal(session.stopped, true);
@@ -206,7 +336,11 @@ export function modelRunnerContract(): readonly ContractCase[] {
       async run(runner) {
         // Shutdown is reached from a signal handler, and a stop that throws the
         // second time turns a tidy exit into an error nobody caused.
-        const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+        const session = await runner.start({
+          tier: 'fast',
+          systemPrompt: 'a',
+          profile: CONTRACT_PROFILE,
+        });
         await session.stop();
         await session.stop();
 
@@ -224,7 +358,11 @@ export function modelRunnerContract(): readonly ContractCase[] {
         // adapter passed this case in 0 ms for exactly that reason, having
         // checked nothing at all. A case that passes by not happening is worse
         // than no case.
-        const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+        const session = await runner.start({
+          tier: 'fast',
+          systemPrompt: 'a',
+          profile: CONTRACT_PROFILE,
+        });
         try {
           const usage = await runner.usage();
           if (usage === null) return; // Still a legitimate answer. See the port.
