@@ -12,6 +12,7 @@ const WORKING: Profile = {
   denyRead: ['/var/lib/cortana/secrets'],
   network: 'denied',
   sandbox: 'required',
+  confirm: 'never',
 };
 
 describe('the one character that decides whether a rule exists', () => {

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { isAppError } from '@cortana/core';
 import { recordingLogger } from '@cortana/core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { approvalThrough, questionFor } from './approval.ts';
 import { connect } from './client.ts';
 import { MAX_FRAME_BYTES, parseClientFrame } from './protocol.ts';
 import { type Channel, createChannel, type SayHandler, socketPathFor } from './server.ts';
@@ -238,5 +239,69 @@ describe('a line that is not a frame', () => {
     await new Promise((resolve) => raw.once('close', resolve));
 
     expect(raw.destroyed).toBe(true);
+  });
+});
+
+describe('turning a decision into a question for a person', () => {
+  const because = 'permitted by the working profile, but this kind of call is confirmed';
+
+  it('names the tool and the whole path', () => {
+    const question = questionFor({ tool: 'Write', path: '/srv/work/out/report.md', writes: true });
+
+    expect(question).toContain('Write');
+    // Whole, not shortened. A prompt that elides the middle of a path reads the
+    // same for two different files, and the difference between them is the
+    // entire question being asked.
+    expect(question).toContain('/srv/work/out/report.md');
+    expect(question).toContain('write');
+  });
+
+  it('says when a call would leave the machine', () => {
+    expect(questionFor({ tool: 'WebFetch', network: true })).toContain('reaching the network');
+  });
+
+  it('says something specific about a call that touches no path', () => {
+    const question = questionFor({ tool: 'Bash', writes: true, network: true });
+
+    expect(question).toContain('Bash');
+    expect(question).not.toContain('undefined');
+  });
+
+  it("carries the policy engine's reason beside the question, not inside it", async () => {
+    const asked: { question: string; because: string }[] = [];
+    const approve = approvalThrough({
+      ask: async (question, why) => {
+        asked.push({ question, because: why });
+        return true;
+      },
+    });
+
+    await approve(
+      { tool: 'Write', path: '/srv/work/out/a', writes: true },
+      {
+        verdict: 'ask',
+        because,
+      },
+    );
+
+    expect(asked[0]?.question).toContain('/srv/work/out/a');
+    expect(asked[0]?.because).toBe(because);
+  });
+
+  it('is a refusal when nobody answers, because the conversation says so', async () => {
+    // Nothing in `approvalThrough` implements a timeout, and that is the point:
+    // `Conversation.ask` already resolves false on a refusal, a disconnection
+    // and on silence. A second timeout here would be a second thing to get wrong.
+    const approve = approvalThrough({ ask: async () => false });
+
+    await expect(
+      approve(
+        { tool: 'Write', path: '/srv/work/out/a', writes: true },
+        {
+          verdict: 'ask',
+          because,
+        },
+      ),
+    ).resolves.toBe(false);
   });
 });

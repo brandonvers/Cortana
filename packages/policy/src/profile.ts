@@ -74,7 +74,22 @@ export interface Profile {
   readonly denyRead: readonly string[];
   readonly network: 'allowed' | 'denied';
   readonly sandbox: SandboxRequirement;
+  /**
+   * Which calls this profile permits are still put to a person first.
+   *
+   * Separate from everything above because it answers a different question.
+   * The fields above say what is *possible*; this says what happens **without a
+   * person in the room**. Nothing here can make a refusal into a question —
+   * there would be nothing to ask about — so this only ever narrows.
+   */
+  readonly confirm: ConfirmPolicy;
 }
+
+/**
+ * `never` runs everything the profile permits. `writes` stops at anything that
+ * modifies or leaves the machine. `always` puts every permitted call to a person.
+ */
+export type ConfirmPolicy = 'never' | 'writes' | 'always';
 
 /**
  * The profile for a disposable agent inspecting content nobody here wrote.
@@ -97,6 +112,16 @@ export const QUARANTINE: Profile = {
   denyRead: [],
   network: 'denied',
   sandbox: 'required',
+  // Deliberately `never`, which reads backwards for the strictest profile in
+  // the system and is the strict answer.
+  //
+  // A question put to an operator is text on their screen, and a quarantine
+  // session is holding content nobody here wrote. Letting it reach the approval
+  // path would hand that content a way to compose a sentence a person reads and
+  // acts on — an injection surface created by the mechanism meant to contain
+  // the injection. It is safe here only because the profile permits nothing:
+  // every call is already a refusal, so there is nothing left to ask about.
+  confirm: 'never',
 };
 
 /**
@@ -116,5 +141,8 @@ export function downgraded(profile: Profile): Profile {
     writable: [],
     network: 'denied',
     sandbox: 'required',
+    // For the reason on QUARANTINE: a session that has touched untrusted content
+    // must not be able to put a sentence in front of the operator.
+    confirm: 'never',
   };
 }

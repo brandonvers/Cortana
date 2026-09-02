@@ -72,6 +72,7 @@ const CONTRACT_PROFILE: Profile = {
   denyRead: [],
   network: 'denied',
   sandbox: 'none',
+  confirm: 'never',
 };
 
 const ANSWER = z.object({
@@ -240,6 +241,39 @@ export function modelRunnerContract(): readonly ContractCase[] {
         assert.ok(['yes', 'no'].includes(result.value.verdict));
         assert.ok(result.value.because.length > 0);
         await session.stop();
+      },
+    },
+
+    {
+      name: 'gives a session no tool its profile did not name',
+      async run(runner) {
+        // The most consequential case here, and the one an adapter is most
+        // likely to satisfy on paper. On 2026-09-02 a session opened under a
+        // profile with no tools called `ToolSearch` and it succeeded, listing
+        // eighteen reachable tools; every unit test in the repository passed
+        // that day, because they all checked what the adapter computed rather
+        // than what the session got.
+        //
+        // Against the fake this is scripted and cannot fail — the fake has no
+        // tools to leak. Against a real provider it is the measurement, and it
+        // is here rather than in a spike so that it is re-run every time the
+        // provider changes underneath this code.
+        const session = await runner.start({
+          tier: 'fast',
+          systemPrompt: 'Answer with facts about your own configuration. Be exact.',
+          profile: CONTRACT_PROFILE,
+        });
+        const result = await session.turn(
+          'Reply with exactly one word and nothing else: NONE if you have no tools ' +
+            'available to call, or the exact name of any one tool you do have.',
+        );
+        await session.stop();
+
+        const said = result.text.trim().toUpperCase();
+        assert.ok(
+          said.startsWith('NONE'),
+          `a profile with no tools left the session holding something: ${result.text.slice(0, 200)}`,
+        );
       },
     },
 

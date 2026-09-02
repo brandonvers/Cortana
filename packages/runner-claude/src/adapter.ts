@@ -27,6 +27,7 @@ import type {
   TurnResult,
 } from '@cortana/runner';
 import type { ZodType } from 'zod';
+import { createGate } from './gate.ts';
 import { settingsFor } from './settings.ts';
 import {
   accountUsageFrom,
@@ -250,6 +251,17 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
     let stopped = false;
     let totalCostUsd = 0;
 
+    /**
+     * Every tool call, decided against the profile — see `gate.ts` for the four
+     * measurements that put it here rather than in the rendered settings.
+     */
+    const gate = createGate({
+      profile: open.spec.profile,
+      ...(open.spec.approve === undefined ? {} : { approve: open.spec.approve }),
+      ...(log === undefined ? {} : { logger: log }),
+      session: id,
+    });
+
     // The profile becomes settings here and nowhere else. Until this line
     // existed, `settingsFor` was correct, tested, and called by nothing: a
     // session opened with every containment finding computed and then dropped
@@ -270,6 +282,41 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
         // admin-controlled managed-settings tier of its own, which would silently
         // remove every deny rule below on exactly the managed machines where they
         // matter most.
+        // The allowlist. Everything else withholds by name, which can only
+        // reach names this repository knows; this decides what the session is
+        // given in the first place.
+        tools: settings.tools,
+        // The gate that fires for every call, including the ones the provider
+        // would resolve on its own. `canUseTool` does not see those.
+        hooks: {
+          PreToolUse: [
+            {
+              hooks: [
+                async (hookInput: Record<string, unknown>) => {
+                  const outcome = await gate(
+                    String(hookInput['tool_name'] ?? ''),
+                    (hookInput['tool_input'] ?? {}) as Record<string, unknown>,
+                  );
+                  return {
+                    hookSpecificOutput: {
+                      hookEventName: 'PreToolUse',
+                      permissionDecision: outcome.allow ? 'allow' : 'deny',
+                      permissionDecisionReason: outcome.because,
+                    },
+                  };
+                },
+              ],
+            },
+          ],
+        },
+        // The same decision on the other surface. A hook `allow` short-circuits
+        // this, so it costs nothing and covers whatever the hook did not see.
+        canUseTool: async (tool: string, toolInput: Record<string, unknown>) => {
+          const outcome = await gate(tool, toolInput);
+          return outcome.allow
+            ? { behavior: 'allow' as const }
+            : { behavior: 'deny' as const, message: outcome.because };
+        },
         settings: { permissions: settings.permissions },
         // The sandbox goes through the SDK's own option instead, because that is
         // the channel spike 0010 measured carrying `failIfUnavailable` intact.

@@ -21,6 +21,10 @@ describe('the ModelRunner contract, against the fake', () => {
       // no case.
       await contractCase.run(
         fakeRunner({
+          // The tool-allowlist case asks the session to name a tool it has, and
+          // a fake has none. Scripted here because the fake cannot fail that
+          // case; it is a claim about a real provider and is checked against one.
+          text: ['NONE'],
           // One value that satisfies every schema the contract asks for, because
           // each case gets a fresh fake and no case should have to know where it
           // sits in the list. Zod strips what an object schema does not declare,

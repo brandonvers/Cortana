@@ -38,6 +38,13 @@ The quarantine agent has:
 
 Only what clears quarantine reaches agents that hold data and tools.
 
+> **How "no tools" is actually enforced was wrong until 2026-09-02.** A session
+> under the profile implementing this ADR was measured calling `ToolSearch`
+> successfully and listing eighteen reachable tools. Withholding tools by name
+> reaches only the names this repository knows.
+> [ADR-0021](0021-containment-is-an-allowlist-applied-to-every-call.md) records
+> the measurements and the mechanism that makes this paragraph true.
+
 The one-way downgrade is **kept**, as the second layer, for anything that reaches
 a working session by another route.
 
