@@ -45,6 +45,12 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/channel:
+    dependencies:
+      '@cortana/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/config:
     dependencies:
       '@cortana/core':
