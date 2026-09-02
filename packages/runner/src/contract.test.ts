@@ -2,7 +2,7 @@ import { isAppError } from '@cortana/core';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { modelRunnerContract } from './contract.ts';
-import { fakeRunner } from './testing.ts';
+import { fakeRunner, TEST_PROFILE } from './testing.ts';
 
 /**
  * The contract, against the second adapter.
@@ -21,9 +21,28 @@ describe('the ModelRunner contract, against the fake', () => {
       // no case.
       await contractCase.run(
         fakeRunner({
+          // One value that satisfies every schema the contract asks for, because
+          // each case gets a fresh fake and no case should have to know where it
+          // sits in the list. Zod strips what an object schema does not declare,
+          // so a value carrying both shapes validates as either — which is a
+          // property of the schemas rather than a trick, and the alternative was
+          // a script whose order encodes the case order.
           values: [
-            { verdict: 'yes', because: 'it has no divisors but one and itself' },
-            { verdict: 'no', because: 'the second structured case needs one too' },
+            {
+              verdict: 'yes',
+              because: 'it has no divisors but one and itself',
+              summary: 'two items, one of which has no note',
+              items: [
+                { name: 'alpha', note: 'first' },
+                { name: 'beta', note: null },
+              ],
+            },
+            {
+              verdict: 'no',
+              because: 'the second structured case needs one too',
+              summary: 'and so does the second turn of any case that takes two',
+              items: [],
+            },
           ],
           accountUsage: {
             subscription: 'pro',
@@ -54,7 +73,10 @@ describe('what the contract cannot cover, covered here', () => {
     // return nonsense on demand, which is why this is here and not in the
     // contract.
     const runner = fakeRunner({ values: [{ verdict: 'maybe', because: '' }] });
-    const session = await runner.startStructured({ tier: 'fast', systemPrompt: 'a' }, ANSWER);
+    const session = await runner.startStructured(
+      { tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE },
+      ANSWER,
+    );
 
     // One call, one scripted value. Asking twice would consume the script and
     // then fail for the entirely different reason that nothing was left.
@@ -76,7 +98,10 @@ describe('what the contract cannot cover, covered here', () => {
     // preventing everywhere else.
     const secretish = 'sk-live-not-a-verdict';
     const runner = fakeRunner({ values: [{ verdict: secretish, because: 'x' }] });
-    const session = await runner.startStructured({ tier: 'fast', systemPrompt: 'a' }, ANSWER);
+    const session = await runner.startStructured(
+      { tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE },
+      ANSWER,
+    );
 
     try {
       await session.turn('anything');
@@ -90,7 +115,10 @@ describe('what the contract cannot cover, covered here', () => {
     // A fake that made up a value satisfying any schema would let a test pass
     // without anyone deciding what the model was supposed to say.
     const runner = fakeRunner();
-    const session = await runner.startStructured({ tier: 'fast', systemPrompt: 'a' }, ANSWER);
+    const session = await runner.startStructured(
+      { tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE },
+      ANSWER,
+    );
 
     await expect(session.turn('anything')).rejects.toThrow(/nothing left scripted/);
   });
@@ -99,7 +127,11 @@ describe('what the contract cannot cover, covered here', () => {
 describe('the fake as a fake', () => {
   it('records what it was asked, in order', async () => {
     const runner = fakeRunner({ text: ['first', 'second'] });
-    const session = await runner.start({ tier: 'balanced', systemPrompt: 'a' });
+    const session = await runner.start({
+      tier: 'balanced',
+      systemPrompt: 'a',
+      profile: TEST_PROFILE,
+    });
 
     expect((await session.turn('one')).text).toBe('first');
     expect((await session.turn('two')).text).toBe('second');

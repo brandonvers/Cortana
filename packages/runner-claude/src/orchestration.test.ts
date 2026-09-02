@@ -1,5 +1,7 @@
 import { isAppError } from '@cortana/core';
 import { recordingLogger } from '@cortana/core/testing';
+import { type Profile, QUARANTINE } from '@cortana/policy';
+import { TEST_PROFILE } from '@cortana/runner/testing';
 import { describe, expect, it } from 'vitest';
 import { createClaudeRunner, type ProviderQuery } from './adapter.ts';
 
@@ -49,7 +51,7 @@ const success = (text: string) => ({
 describe('a session that stops answering', () => {
   it('gives up on its own rather than waiting for the life of the process', async () => {
     const runner = await createClaudeRunner({ openConversation: silent, turnTimeoutMs: 40 });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     const failure = await session.turn('anything').catch((error: unknown) => error);
 
@@ -61,7 +63,7 @@ describe('a session that stops answering', () => {
     // A session that has been given up on must not look usable, or the next
     // caller waits the same deadline again for the same reason.
     const runner = await createClaudeRunner({ openConversation: silent, turnTimeoutMs: 40 });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     await session.turn('anything').catch(() => undefined);
 
@@ -71,7 +73,7 @@ describe('a session that stops answering', () => {
 
   it('says how long it waited, so the deadline is arguable', async () => {
     const runner = await createClaudeRunner({ openConversation: silent, turnTimeoutMs: 40 });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     const failure = await session.turn('anything').catch((error: unknown) => error);
 
@@ -86,7 +88,7 @@ describe('a turn that answers in time', () => {
       openConversation: () => answers(success('here you are')),
       turnTimeoutMs: 5_000,
     });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     expect((await session.turn('anything')).text).toBe('here you are');
   });
@@ -99,7 +101,7 @@ describe('a turn that answers in time', () => {
       openConversation: () => answers(success('done')),
       turnTimeoutMs: 60_000,
     });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     await session.turn('anything');
     await session.stop();
@@ -113,7 +115,7 @@ describe('a turn that answers in time', () => {
 describe('a stream that ends without answering', () => {
   it('is reported rather than hung on', async () => {
     const runner = await createClaudeRunner({ openConversation: () => answers() });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     const failure = await session.turn('anything').catch((error: unknown) => error);
 
@@ -139,7 +141,7 @@ describe('a warning pushed mid-turn', () => {
         ),
       onRateLimit: (warning) => seen.push(`${warning.window}:${warning.utilization}`),
     });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     const result = await session.turn('anything');
 
@@ -159,7 +161,7 @@ describe('what the log is told about rate limits', () => {
           success('fine'),
         ),
     });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
     await session.turn('anything');
     return logger;
   };
@@ -187,5 +189,91 @@ describe('what the log is told about rate limits', () => {
 
     expect(logger.text()).not.toContain('-1');
     expect(logger.entries.at(-1)?.fields).not.toHaveProperty('utilization');
+  });
+});
+
+describe('the profile, on its way to the provider', () => {
+  /**
+   * What `query` was actually called with.
+   *
+   * The assertions below deliberately read the call rather than `settingsFor`.
+   * `settingsFor` was correct and fully tested from the moment it was written,
+   * and until this milestone it was called by nothing: every containment finding
+   * five spikes produced was computed and dropped. Testing the renderer proves
+   * the renderer; only the call proves the session.
+   */
+  async function optionsFor(profile: Profile): Promise<Record<string, unknown>> {
+    let captured: Record<string, unknown> | null = null;
+    const runner = await createClaudeRunner({
+      openConversation: (params) => {
+        captured = (params as { options: Record<string, unknown> }).options;
+        return answers(success('ok'));
+      },
+    });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile });
+    await session.stop();
+    if (captured === null) throw new Error('the conversation was never opened');
+    return captured;
+  }
+
+  it('removes every tool the profile does not name', async () => {
+    const options = await optionsFor(QUARANTINE);
+    const deny = (options['settings'] as { permissions: { deny: string[] } }).permissions.deny;
+
+    // A bare tool name removes the tool rather than gating it — spike 0011, and
+    // the strongest lock the provider offers.
+    expect(deny).toContain('Bash');
+    expect(deny).toContain('Read');
+    expect(deny).toContain('WebFetch');
+  });
+
+  it('carries the deny rules through the flag layer, not the managed one', async () => {
+    const options = await optionsFor({
+      name: 'reader',
+      trust: 'system',
+      tools: ['Read'],
+      readable: ['/srv/work'],
+      writable: [],
+      denyRead: ['/srv/work/secrets'],
+      network: 'denied',
+      sandbox: 'required',
+    });
+
+    // Spike 0010 measured the SDK's managed tier being dropped entirely on a
+    // machine that has an admin-controlled managed-settings tier — which would
+    // remove these rules on exactly the machines most likely to have one.
+    expect(options).not.toHaveProperty('managedSettings');
+    const deny = (options['settings'] as { permissions: { deny: string[] } }).permissions.deny;
+    expect(deny).toContain('Read(//srv/work/secrets/**)');
+    expect(deny).not.toContain('Read');
+  });
+
+  it('requires the sandbox through the channel that carries the requirement', async () => {
+    const options = await optionsFor(QUARANTINE);
+
+    expect(options['sandbox']).toMatchObject({
+      enabled: true,
+      failIfUnavailable: true,
+      autoAllowBashIfSandboxed: false,
+      allowUnsandboxedCommands: false,
+    });
+  });
+
+  it('says an optional sandbox is optional, rather than leaving it to a default', async () => {
+    const options = await optionsFor({ ...QUARANTINE, sandbox: 'optional' });
+
+    // The default for this flag depends on the channel that delivers it — spike
+    // 0010 — so an omitted value through this one means `required`. A profile
+    // that says optional and refuses to start on a host without bubblewrap is a
+    // failure with no explanation anywhere in the profile.
+    expect(options['sandbox']).toMatchObject({ enabled: true, failIfUnavailable: false });
+  });
+
+  it('leaves the session nothing but the profile to be shaped by', async () => {
+    const options = await optionsFor(QUARANTINE);
+
+    expect(options['settingSources']).toEqual([]);
+    expect(options['strictMcpConfig']).toBe(true);
+    expect(options['mcpServers']).toEqual({});
   });
 });

@@ -1,4 +1,5 @@
 import type { SessionId } from '@cortana/core';
+import type { Profile } from '@cortana/policy';
 import type { ZodType } from 'zod';
 
 /**
@@ -21,6 +22,25 @@ export interface SessionSpec {
   readonly tier: ModelTier;
   /** Who this agent is. Sent once and cached, not repeated per turn. */
   readonly systemPrompt: string;
+  /**
+   * What this session may do. **Required, and that is the point.**
+   *
+   * It could have been optional with a permissive default, and every session
+   * opened without thinking about it would then have been permissive. The
+   * failure would be silent, would pass every test, and would look exactly like
+   * a session that had been considered.
+   *
+   * Making it required means containment cannot be forgotten: a session opened
+   * without a profile does not compile. That is the only enforcement mechanism
+   * in this file that costs nothing at runtime and cannot be talked past.
+   *
+   * A `Profile` is provider-neutral by construction — `@cortana/policy` holds no
+   * provider vocabulary, which is why it can sit in the port without violating
+   * [ADR-0001](../../../docs/adr/0001-model-access-behind-a-port.md). Turning it
+   * into settings some provider reads is the adapter's job, and it is the second
+   * of the two layers CONCEPTS §7 requires; the first is `decide`.
+   */
+  readonly profile: Profile;
 }
 
 /**

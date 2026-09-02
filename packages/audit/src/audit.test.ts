@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type InstanceId, newInstanceId } from '@cortana/core';
 import { manualClock, recordingLogger } from '@cortana/core/testing';
-import { fakeRunner } from '@cortana/runner/testing';
+import { fakeRunner, TEST_PROFILE } from '@cortana/runner/testing';
 import {
   createWriter,
   migrateToLatest,
@@ -58,7 +58,11 @@ describe('the migration this package contributes', () => {
 describe('recording a turn', () => {
   it('keeps what was asked and what came back', async () => {
     const runner = auditedRunner(fakeRunner({ text: ['seven is prime'] }), { writer, instanceId });
-    const session = await runner.start({ tier: 'balanced', systemPrompt: 'Answer briefly.' });
+    const session = await runner.start({
+      tier: 'balanced',
+      systemPrompt: 'Answer briefly.',
+      profile: TEST_PROFILE,
+    });
 
     await session.turn('Is seven prime?');
 
@@ -89,7 +93,7 @@ describe('recording a turn', () => {
       }),
       { writer, instanceId },
     );
-    const session = await runner.start({ tier: 'deep', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'deep', systemPrompt: 'a', profile: TEST_PROFILE });
     await session.turn('anything');
 
     const [row] = rows();
@@ -100,7 +104,7 @@ describe('recording a turn', () => {
 
   it('records a null cost as null rather than as free', async () => {
     const runner = auditedRunner(fakeRunner({ usage: { costUsd: null } }), { writer, instanceId });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
     await session.turn('anything');
 
     expect(rows()[0]?.costUsd).toBeNull();
@@ -111,7 +115,10 @@ describe('recording a turn', () => {
       writer,
       instanceId,
     });
-    const session = await runner.startStructured({ tier: 'fast', systemPrompt: 'a' }, ANSWER);
+    const session = await runner.startStructured(
+      { tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE },
+      ANSWER,
+    );
     await session.turn('Is seven prime?');
 
     const [row] = rows();
@@ -125,7 +132,10 @@ describe('recording a turn', () => {
       writer,
       instanceId,
     });
-    const session = await runner.startStructured({ tier: 'fast', systemPrompt: 'a' }, ANSWER);
+    const session = await runner.startStructured(
+      { tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE },
+      ANSWER,
+    );
 
     await expect(session.turn('Is seven prime?')).rejects.toThrow(/schema rejected/);
 
@@ -141,7 +151,7 @@ describe('recording a turn', () => {
     // database already knows about. Checked by looking at the table from inside
     // the continuation, before anything else runs.
     const runner = auditedRunner(fakeRunner(), { writer, instanceId });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     let rowsAtReturn = -1;
     await session.turn('anything').then(() => {
@@ -154,7 +164,7 @@ describe('recording a turn', () => {
   it('measures how long the turn took, on the clock it was given', async () => {
     const clock = manualClock();
     const runner = auditedRunner(fakeRunner(), { writer, instanceId, clock });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     const turn = session.turn('anything');
     clock.advance(2_400);
@@ -169,7 +179,7 @@ describe('recording a turn', () => {
     // does the caller.
     const plain = fakeRunner();
     const runner = auditedRunner(plain, { writer, instanceId });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     await session.turn('one');
     await session.turn('two');
@@ -180,7 +190,7 @@ describe('recording a turn', () => {
 
   it('leaves the port’s behaviour alone', async () => {
     const runner = auditedRunner(fakeRunner({ text: ['answered'] }), { writer, instanceId });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     expect((await session.turn('x')).text).toBe('answered');
     await session.stop();
@@ -197,7 +207,10 @@ describe('recording a turn', () => {
       instanceId,
       logger,
     });
-    const session = await runner.startStructured({ tier: 'fast', systemPrompt: 'a' }, ANSWER);
+    const session = await runner.startStructured(
+      { tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE },
+      ANSWER,
+    );
     await writer.drain();
 
     await expect(session.turn('anything')).rejects.toThrow(/schema rejected/);
@@ -213,7 +226,7 @@ describe('forgetting', () => {
     for (const days of ages) {
       const clock = manualClock(now - days * dayMs);
       const aged = auditedRunner(fakeRunner(), { writer, instanceId, clock });
-      const session = await aged.start({ tier: 'fast', systemPrompt: 'a' });
+      const session = await aged.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
       await session.turn(`${days} days old`);
     }
     void runner;
@@ -275,7 +288,7 @@ describe('what the table is, stated once', () => {
     // object being formatted, it is what someone typed. There is no type that
     // helps here, and pretending otherwise would be worse than saying so.
     const runner = auditedRunner(fakeRunner(), { writer, instanceId });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
 
     await session.turn('my imap password is hunter2, please check the mail');
 
@@ -284,7 +297,7 @@ describe('what the table is, stated once', () => {
 
   it('sorts by identifier in the order the turns happened', async () => {
     const runner = auditedRunner(fakeRunner(), { writer, instanceId });
-    const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
     for (const prompt of ['first', 'second', 'third']) await session.turn(prompt);
 
     const newestFirst = storage.db.select().from(auditTurns).orderBy(desc(auditTurns.id)).all();
@@ -301,7 +314,11 @@ describe('what can honestly be said about cost', () => {
         }),
         { writer, instanceId },
       );
-      const session = await runner.start({ tier: 'fast', systemPrompt: 'a' });
+      const session = await runner.start({
+        tier: 'fast',
+        systemPrompt: 'a',
+        profile: TEST_PROFILE,
+      });
       await session.turn('anything');
     }
   }
@@ -360,7 +377,10 @@ describe('what can honestly be said about cost', () => {
       writer,
       instanceId,
     });
-    const session = await runner.startStructured({ tier: 'fast', systemPrompt: 'a' }, ANSWER);
+    const session = await runner.startStructured(
+      { tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE },
+      ANSWER,
+    );
     await expect(session.turn('x')).rejects.toThrow();
 
     const summary = summariseCost(storage);
@@ -380,7 +400,7 @@ describe('what can honestly be said about cost', () => {
         instanceId,
         clock: manualClock(now - days * 86_400_000),
       });
-      const session = await aged.start({ tier: 'fast', systemPrompt: 'a' });
+      const session = await aged.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
       await session.turn(`${days} days old`);
     }
 

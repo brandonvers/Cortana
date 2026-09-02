@@ -92,8 +92,40 @@ export interface ProviderSettings {
  *   nobody chose for it.
  * - **`settingSources: []`**, so the profile is the whole of what this session
  *   is, rather than the profile plus whatever is in the operator's files.
+ *
+ * ## One thing it does not render, named rather than faked
+ *
+ * `profile.network` reaches nothing here. For every profile written so far that
+ * is harmless — the network tools are withheld by name like any other, and the
+ * quarantine profile has no tools at all — but a profile that denied the network
+ * *and* granted `Bash` would have an open egress path and a field claiming
+ * otherwise.
+ *
+ * The sandbox has settings for it. **None of them has been measured**, and this
+ * project's rule is that a property enforced once is not enforced, which makes
+ * an unmeasured security setting worse than an absent one: it reads as a closed
+ * door. So the gap is recorded and the door is left visibly open until a spike
+ * shuts it. `settingsFor` refuses that combination below rather than rendering
+ * something that looks like containment.
  */
+/** Tools that reach the network by running whatever they are given. */
+const EGRESS_TOOLS: readonly string[] = ['Bash'];
+
 export function settingsFor(profile: Profile): ProviderSettings {
+  // Refused rather than rendered. The alternative is a profile that says the
+  // network is denied, settings that say nothing about the network, and a shell
+  // that can reach it — three statements where two of them are wrong and the
+  // wrong ones are the reassuring ones.
+  if (profile.network === 'denied') {
+    const egress = profile.tools.filter((tool) => EGRESS_TOOLS.includes(tool));
+    if (egress.length > 0) {
+      throw new Error(
+        `the "${profile.name}" profile denies the network and grants ${egress.join(', ')}, ` +
+          'and nothing here has been measured to close that path — see the note above settingsFor',
+      );
+    }
+  }
+
   const withheld = KNOWN_TOOLS.filter((tool) => !profile.tools.includes(tool));
   const denyReadRules = profile.denyRead.map(readDenyRule);
 
@@ -107,7 +139,16 @@ export function settingsFor(profile: Profile): ProviderSettings {
           autoAllowBashIfSandboxed: false,
           allowUnsandboxedCommands: false,
           excludedCommands: [],
-          ...(profile.sandbox === 'required' ? { failIfUnavailable: true } : {}),
+          // Stated in both directions, and it was not until this was wired into
+          // the adapter. Spike 0010 measured this default depending on the
+          // channel that carries it — `true` through the SDK's sandbox option,
+          // `false` from a settings file — so omitting it for an `optional`
+          // profile does not mean "optional": it means whatever the delivery
+          // route happens to think, and through the route this adapter uses
+          // that is `required`. A profile that says optional and behaves as
+          // required is a session that refuses to start on a host without
+          // bubblewrap, for a reason nothing in the profile explains.
+          failIfUnavailable: profile.sandbox === 'required',
           ...(profile.denyRead.length > 0
             ? { filesystem: { denyRead: [...profile.denyRead] } }
             : {}),

@@ -1,0 +1,20 @@
+{
+  "name": "@cortana/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The one agent: the shape of its answers, the session it holds, and the loop that runs a turn.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@cortana/core": "workspace:*",
+    "@cortana/policy": "workspace:*",
+    "@cortana/runner": "workspace:*",
+    "zod": "^4.5.4"
+  }
+}
