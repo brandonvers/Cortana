@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@cortana/core": "workspace:*",
+    "@cortana/policy": "workspace:*",
     "@cortana/runner": "workspace:*",
     "zod": "^4.5.4"
   },
