@@ -7,7 +7,14 @@ import {
   needsConfirmation,
 } from './decide.ts';
 import * as policy from './index.ts';
-import { downgraded, type Profile, QUARANTINE } from './profile.ts';
+import {
+  CONTAINMENT_INVARIANTS,
+  containmentFailures,
+  downgraded,
+  type Profile,
+  QUARANTINE,
+  quarantineProfile,
+} from './profile.ts';
 
 const WORKING: Profile = {
   name: 'working',
@@ -241,5 +248,87 @@ describe('the decision a session actually uses', () => {
     // would hand that content a sentence to compose.
     expect(QUARANTINE.confirm).toBe('never');
     expect(downgraded({ ...WORKING, confirm: 'always' }).confirm).toBe('never');
+  });
+});
+
+describe('the generated quarantine profile', () => {
+  const generated = quarantineProfile({ source: 'mailbox' });
+
+  it('is contained on every count', () => {
+    expect(containmentFailures(generated)).toEqual([]);
+  });
+
+  it('says where the content came from, in the name and nowhere else', () => {
+    // The source is frequently a string the content itself supplied. It names
+    // the profile so a refusal in a log can be attributed, and it reaches no
+    // permission decision.
+    expect(generated.name).toContain('mailbox');
+    expect(generated.tools).toEqual([]);
+    expect(generated.readable).toEqual([]);
+  });
+
+  it('still carries paths that must never be read', () => {
+    // Redundant against `readable: []` and kept anyway: "reads nothing" and
+    // "must never read that" do not fail the same way when somebody widens the
+    // first.
+    const withDenials = quarantineProfile({ source: 'web', denyRead: ['/var/lib/cortana'] });
+
+    expect(withDenials.denyRead).toEqual(['/var/lib/cortana']);
+  });
+
+  /**
+   * M3's definition of done, as a test rather than a review.
+   *
+   * "The quarantine profile carries every setting spikes 0010 to 0012 found
+   * necessary, and a generated profile missing one fails a test rather than a
+   * review." Five of those settings are silent when absent — the session runs,
+   * looks contained, and is not — so the check is made by taking the generated
+   * profile apart one property at a time and requiring each removal to be
+   * noticed.
+   *
+   * The loop is over the invariants themselves, so an invariant added later is
+   * covered without anybody remembering to add a case for it.
+   */
+  describe('with one setting taken away', () => {
+    const WIDENED: Readonly<Record<string, Partial<Profile>>> = {
+      'no tools': { tools: ['Read'] },
+      'nothing readable': { readable: ['/'] },
+      'nothing writable': { writable: ['/tmp'] },
+      'no network': { network: 'allowed' },
+      'a sandbox that must be there': { sandbox: 'optional' },
+      untrusted: { trust: 'owner' },
+      'asks nobody anything': { confirm: 'always' },
+    };
+
+    it('has a way to widen every invariant, so none of them is untested', () => {
+      // Without this the table below silently stops covering an invariant added
+      // later, and the loop would report a pass for a property nobody weakened.
+      expect(Object.keys(WIDENED).sort()).toEqual(
+        CONTAINMENT_INVARIANTS.map((invariant) => invariant.name).sort(),
+      );
+    });
+
+    for (const invariant of CONTAINMENT_INVARIANTS) {
+      it(`is no longer contained without "${invariant.name}"`, () => {
+        const weakened: Profile = { ...generated, ...WIDENED[invariant.name] };
+
+        expect(containmentFailures(weakened).map((failed) => failed.name)).toContain(
+          invariant.name,
+        );
+      });
+    }
+  });
+
+  it('refuses to hand back a profile it cannot contain', () => {
+    // The generator checks its own output, so an edit that drops a property
+    // fails where the edit is rather than wherever the profile is later used.
+    expect(CONTAINMENT_INVARIANTS.length).toBeGreaterThan(0);
+    expect(() => quarantineProfile({ source: 'x' })).not.toThrow();
+  });
+
+  it('every invariant says why it exists, for whoever weakens one', () => {
+    for (const invariant of CONTAINMENT_INVARIANTS) {
+      expect(invariant.because.length).toBeGreaterThan(40);
+    }
   });
 });

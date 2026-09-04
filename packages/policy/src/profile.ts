@@ -92,37 +92,143 @@ export interface Profile {
 export type ConfirmPolicy = 'never' | 'writes' | 'always';
 
 /**
+ * What a profile must be for a session that handles content nobody here wrote.
+ *
+ * Each entry is a property, the reason it exists, and the measurement behind it.
+ * They are data rather than a paragraph in a review checklist because
+ * [M3's definition of done](../../../docs/milestones/m3-conversation.md) asks
+ * for exactly that: "a generated profile missing one fails a test rather than a
+ * review". Five of these are settings whose absence is **silent** — the session
+ * runs, looks contained, and is not.
+ */
+export interface Invariant {
+  readonly name: string;
+  readonly because: string;
+  holds(profile: Profile): boolean;
+}
+
+export const CONTAINMENT_INVARIANTS: readonly Invariant[] = [
+  {
+    name: 'no tools',
+    because:
+      'the content arrives in the prompt and the answer is a verdict; anything more is a way ' +
+      'for the content to act. ADR-0021: the tool list is the allowlist, and an empty one is ' +
+      'the only spelling of "nothing" the provider honours',
+    holds: (profile) => profile.tools.length === 0,
+  },
+  {
+    name: 'nothing readable',
+    because: 'a path this session can reach is a path the content can ask it to read out',
+    holds: (profile) => profile.readable.length === 0,
+  },
+  {
+    name: 'nothing writable',
+    because: 'an inspection produces a verdict, and a verdict is returned rather than written',
+    holds: (profile) => profile.writable.length === 0,
+  },
+  {
+    name: 'no network',
+    because:
+      'egress is how an inspection becomes an exfiltration. Spike 0011 measured WebFetch ' +
+      'succeeding with the locks off and refused with them on',
+    holds: (profile) => profile.network === 'denied',
+  },
+  {
+    name: 'a sandbox that must be there',
+    because:
+      'spike 0010 measured the difference: without failIfUnavailable a session whose sandbox ' +
+      'is missing runs anyway, uncontained and unannounced',
+    holds: (profile) => profile.sandbox === 'required',
+  },
+  {
+    name: 'untrusted',
+    because:
+      'CONCEPTS §7.3 makes the downgrade one-way, and a session inspecting untrusted content ' +
+      'that called itself trusted would be the one place the rule had an exception',
+    holds: (profile) => profile.trust === 'untrusted',
+  },
+  {
+    name: 'asks nobody anything',
+    because:
+      'a question is text an operator reads and acts on. A session holding content nobody ' +
+      'here wrote must not be able to compose one',
+    holds: (profile) => profile.confirm === 'never',
+  },
+];
+
+/** Which invariants this profile fails. Empty means it is contained. */
+export function containmentFailures(profile: Profile): readonly Invariant[] {
+  return CONTAINMENT_INVARIANTS.filter((invariant) => !invariant.holds(profile));
+}
+
+export interface QuarantineOptions {
+  /**
+   * Where the content came from — a mailbox, a URL, a file.
+   *
+   * Names the profile so a refusal in a log says which inspection it belonged
+   * to. It reaches no permission decision, and it must not: it is frequently a
+   * string the content itself supplied.
+   */
+  readonly source: string;
+  /**
+   * Paths that must never be readable, whatever else permits.
+   *
+   * Redundant against `readable: []` and kept anyway, because the two say
+   * different things: "this session reads nothing" and "this must never be read"
+   * do not fail the same way when somebody later widens the first.
+   */
+  readonly denyRead?: readonly string[];
+}
+
+/**
  * The profile for a disposable agent inspecting content nobody here wrote.
  *
  * [ADR-0007](../../../docs/adr/0007-quarantine-untrusted-content.md) puts one of
- * these in front of anything untrusted, and this is the strictest thing the
- * design can express: **no tools at all**, nothing readable, nothing writable, no
- * network, and a sandbox whose absence stops the session rather than being noted.
+ * these in front of anything untrusted. **Generated rather than written**, and
+ * that is a requirement rather than a convenience: every property above is one
+ * a hand-written profile can omit without producing an error, and the session
+ * then runs looking exactly like a contained one.
  *
- * It needs no tools because it needs no capability. The content arrives in its
- * prompt and its answer is a verdict. Anything it could do beyond that is a way
- * for the content to act, which is the whole thing being prevented.
+ * It checks its own output before returning it, so a future edit that drops a
+ * property fails where the edit is rather than wherever the profile is used.
  */
-export const QUARANTINE: Profile = {
-  name: 'quarantine',
-  trust: 'untrusted',
-  tools: [],
-  readable: [],
-  writable: [],
-  denyRead: [],
-  network: 'denied',
-  sandbox: 'required',
-  // Deliberately `never`, which reads backwards for the strictest profile in
-  // the system and is the strict answer.
-  //
-  // A question put to an operator is text on their screen, and a quarantine
-  // session is holding content nobody here wrote. Letting it reach the approval
-  // path would hand that content a way to compose a sentence a person reads and
-  // acts on — an injection surface created by the mechanism meant to contain
-  // the injection. It is safe here only because the profile permits nothing:
-  // every call is already a refusal, so there is nothing left to ask about.
-  confirm: 'never',
-};
+export function quarantineProfile(options: QuarantineOptions): Profile {
+  const profile: Profile = {
+    name: `quarantine:${options.source}`,
+    trust: 'untrusted',
+    tools: [],
+    readable: [],
+    writable: [],
+    denyRead: [...(options.denyRead ?? [])],
+    network: 'denied',
+    sandbox: 'required',
+    confirm: 'never',
+  };
+
+  // Deliberately unreachable while the literal above is correct, and that is
+  // what it is for: it fires when somebody edits that literal, at the edit
+  // rather than wherever the profile is later used. No test can reach it —
+  // reaching it means the generator is already wrong — so `containmentFailures`
+  // is tested directly instead, against a profile widened one property at a
+  // time. This is recorded rather than left as a silent gap in a mutation run.
+  const failures = containmentFailures(profile);
+  if (failures.length > 0) {
+    throw new Error(
+      `the quarantine generator produced an uncontained profile, failing: ${failures
+        .map((invariant) => invariant.name)
+        .join(', ')}`,
+    );
+  }
+  return profile;
+}
+
+/**
+ * The quarantine profile for content with nothing more specific to say about it.
+ *
+ * Produced by the generator rather than written out, so that there is no
+ * hand-written containment profile anywhere in this repository to copy.
+ */
+export const QUARANTINE: Profile = quarantineProfile({ source: 'unattributed' });
 
 /**
  * Narrows a profile to untrusted, and never the other way.
