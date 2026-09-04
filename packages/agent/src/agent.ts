@@ -18,26 +18,33 @@
  * M3, and ADR-0011's typed bus is exactly the thing that makes such a guess
  * expensive to correct.
  *
- * ## The honest boundary of what is decided here
+ * ## Both paths reach the same policy engine, and that is new
  *
- * `decide` runs against every action the agent *declares*. It does not run
- * against the tools the agent uses inside its own session — `Read`, `Bash` and
- * the rest execute inside the provider, and the port has no seam through which
- * a per-call decision could reach them.
+ * An earlier version of this file said the opposite, and said it carefully: the
+ * policy engine decided the actions the agent *declared*, and the tools it used
+ * inside its own session were governed only by the rendered settings and the
+ * sandbox, because "the port has no seam through which a per-call decision could
+ * reach them". That was true, it was named rather than hidden, and step 4 found
+ * the limit was worse than the paragraph admitted — the settings layer could
+ * only withhold tool names this repository had heard of, and a quarantine
+ * session was measured using one it had not.
  *
- * That is not a hole, because those tools are governed by the two layers
- * CONCEPTS §7 asks for: the profile rendered into the session's settings, where
- * a withheld tool is removed rather than gated
- * ([spike 0011](../../../docs/spikes/0011-quarantine-escape.md)), and the OS
- * sandbox. It is a **limit worth naming**, because "the policy engine decides
- * every tool call" would be a fair reading of the milestone and is not what this
- * does. Whether the port should grow such a seam is M3 step 4's question, and it
- * is not answered by pretending it already has one.
+ * The port has that seam now. Both paths run `decideForSession` against the same
+ * profile, and both reach the same person through the same `approve`. What is
+ * left of the earlier caveat is only this: the two paths are decided in two
+ * places — one here, one in the adapter's gate — because one of them happens
+ * inside the provider. They cannot be one function, so they are one policy.
  */
 
 import { AppError, type Logger, type SessionId } from '@cortana/core';
-import { type Decision, decide, type Profile, type ToolRequest } from '@cortana/policy';
-import type { ModelRunner, ModelTier, StructuredSession, TurnUsage } from '@cortana/runner';
+import { type Decision, decideForSession, type Profile, type ToolRequest } from '@cortana/policy';
+import type {
+  Approve,
+  ModelRunner,
+  ModelTier,
+  StructuredSession,
+  TurnUsage,
+} from '@cortana/runner';
 import { composePrompt } from './prompt.ts';
 import { type AgentAnswer, agentAnswer, type ToolIntent } from './schema.ts';
 
@@ -83,6 +90,19 @@ export interface AgentOptions {
   /** Who this agent is. The only part of the prompt a person writes. */
   readonly persona: string;
   readonly tier?: ModelTier;
+  /**
+   * How a call the profile will not decide alone is put to a person.
+   *
+   * Passed to the session as well as used here, so that **both** paths reach the
+   * same person: the tools the model uses inside its session, and the actions it
+   * asks the kernel for. Two approval routes with different answers would be a
+   * worse failure than one route, because only one of them would be the one
+   * anybody tested.
+   *
+   * Absent means nobody is available, and a question nobody can answer is a
+   * refusal.
+   */
+  readonly approve?: Approve;
   readonly logger?: Logger;
 }
 
@@ -136,9 +156,33 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
       tier,
       systemPrompt: composePrompt({ persona: options.persona, profile }),
       profile,
+      ...(options.approve === undefined ? {} : { approve: options.approve }),
     },
     agentAnswer,
   );
+
+  /**
+   * Turns an `ask` into the answer, or into a refusal when there is nobody.
+   *
+   * The question is **built here, from the tool and the path**, and deliberately
+   * not from the agent's own `why`. That field is written by a model, it is
+   * shown to a person, and a person reading a sentence composed by the thing
+   * asking permission is the shape of every convincing request that should not
+   * have been granted. The agent's reason travels in the `because` alongside it,
+   * attributed, rather than as the question itself.
+   */
+  const settle = async (request: ToolRequest, decision: Decision): Promise<Decision> => {
+    if (decision.verdict !== 'ask') return decision;
+
+    const approve = options.approve;
+    if (approve === undefined) {
+      return { verdict: 'deny', because: `${decision.because}, and nobody is available to ask` };
+    }
+
+    return (await approve(request, decision))
+      ? { verdict: 'allow', because: 'approved by the operator' }
+      : { verdict: 'deny', because: 'refused by the operator' };
+  };
 
   /** What the next turn has to be told about the last one. Empty most turns. */
   let carried: string | null = null;
@@ -172,10 +216,17 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
 
     const result = await session.turn(prompt);
 
-    const actions: DecidedAction[] = result.value.actions.map((intent) => ({
-      intent,
-      decision: decide(profile, asRequest(intent)),
-    }));
+    // Decided one at a time, and asked about one at a time. `decideForSession`
+    // rather than `decide` because the profile's own answer to "should a person
+    // see this first" is part of the decision, and a caller reaching for the
+    // boundary alone gets an agent that never asks anybody anything — which is
+    // not a mistake visible from outside.
+    const actions: DecidedAction[] = [];
+    for (const intent of result.value.actions) {
+      const request = asRequest(intent);
+      const decision = decideForSession(profile, request);
+      actions.push({ intent, decision: await settle(request, decision) });
+    }
 
     const refused = actions.filter((action) => action.decision.verdict !== 'allow');
     if (refused.length > 0) {

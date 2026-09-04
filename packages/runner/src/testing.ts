@@ -56,6 +56,7 @@ export const TEST_PROFILE: Profile = {
   denyRead: [],
   network: 'denied',
   sandbox: 'none',
+  confirm: 'never',
 };
 
 export interface RecordedTurn {

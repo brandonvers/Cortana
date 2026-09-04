@@ -42,6 +42,7 @@ export type { ContractCase } from './contract.ts';
 export { modelRunnerContract } from './contract.ts';
 export type {
   AccountUsage,
+  Approve,
   ModelRunner,
   ModelSession,
   ModelTier,

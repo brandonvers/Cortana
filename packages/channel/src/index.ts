@@ -1,3 +1,4 @@
+export { approvalThrough, questionFor } from './approval.ts';
 export type { Client, ClientOptions } from './client.ts';
 export { connect } from './client.ts';
 export type { ClientFrame, ServerFrame } from './protocol.ts';

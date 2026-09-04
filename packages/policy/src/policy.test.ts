@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { decide, decideWithConfirmation, isInside } from './decide.ts';
+import {
+  decide,
+  decideForSession,
+  decideWithConfirmation,
+  isInside,
+  needsConfirmation,
+} from './decide.ts';
 import * as policy from './index.ts';
 import { downgraded, type Profile, QUARANTINE } from './profile.ts';
 
@@ -12,6 +18,7 @@ const WORKING: Profile = {
   denyRead: ['/var/lib/cortana/secrets'],
   network: 'allowed',
   sandbox: 'required',
+  confirm: 'never',
 };
 
 describe('containment is by segment, not by prefix', () => {
@@ -181,5 +188,58 @@ describe('downgrading', () => {
 
   it('stays at the bottom when applied twice', () => {
     expect(downgraded(downgraded(WORKING)).trust).toBe('untrusted');
+  });
+});
+
+describe('which permitted calls still need a person', () => {
+  const asks = (confirm: Profile['confirm']) => needsConfirmation({ ...WORKING, confirm });
+
+  it('asks about nothing when the profile says never', () => {
+    expect(asks('never')({ tool: 'Write', writes: true })).toBe(false);
+  });
+
+  it('asks about everything when the profile says always', () => {
+    expect(asks('always')({ tool: 'Read' })).toBe(true);
+  });
+
+  it('treats a write and an egress as the same question', () => {
+    // From an operator's point of view "it changed something" and "it left the
+    // machine" are one question — is this irreversible? — and a profile that
+    // asked about one and not the other would be answering half of it.
+    const writes = asks('writes');
+
+    expect(writes({ tool: 'Write', writes: true })).toBe(true);
+    expect(writes({ tool: 'WebFetch', network: true })).toBe(true);
+    expect(writes({ tool: 'Read', writes: false, network: false })).toBe(false);
+  });
+});
+
+describe('the decision a session actually uses', () => {
+  it("is the boundary and the profile's own answer about people, together", () => {
+    const profile: Profile = { ...WORKING, confirm: 'writes' };
+
+    expect(decideForSession(profile, { tool: 'Read', path: '/etc/cortana/a' }).verdict).toBe(
+      'allow',
+    );
+    expect(
+      decideForSession(profile, { tool: 'Write', path: '/var/lib/cortana/a', writes: true })
+        .verdict,
+    ).toBe('ask');
+  });
+
+  it('cannot turn a refusal into a question, in either direction', () => {
+    // There would be nothing to ask about. A profile that permits nothing is not
+    // made consultable by asking it to be.
+    const profile: Profile = { ...WORKING, confirm: 'always' };
+
+    expect(decideForSession(profile, { tool: 'Bash' }).verdict).toBe('deny');
+  });
+
+  it('never asks on behalf of a session holding untrusted content', () => {
+    // A question is text an operator reads and acts on. A quarantine session is
+    // holding content nobody here wrote, and letting it reach the approval path
+    // would hand that content a sentence to compose.
+    expect(QUARANTINE.confirm).toBe('never');
+    expect(downgraded({ ...WORKING, confirm: 'always' }).confirm).toBe('never');
   });
 });

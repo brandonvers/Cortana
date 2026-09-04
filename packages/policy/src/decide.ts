@@ -88,6 +88,35 @@ export function decide(profile: Profile, request: ToolRequest): Decision {
 }
 
 /**
+ * Whether a call this profile permits is still put to a person.
+ *
+ * `writes` covers modification and egress together, which is one predicate for
+ * two things on purpose: from an operator's point of view "it changed something"
+ * and "it left the machine" are the same question — *is this irreversible?* —
+ * and a profile that asked about one and not the other would be answering half
+ * of it.
+ */
+export function needsConfirmation(profile: Profile): (request: ToolRequest) => boolean {
+  if (profile.confirm === 'never') return () => false;
+  if (profile.confirm === 'always') return () => true;
+  return (request) => request.writes === true || request.network === true;
+}
+
+/**
+ * What actually happens to one call under one profile: the security decision,
+ * and then the profile's own answer to whether a person should see it first.
+ *
+ * This is the function a session uses. `decide` and `decideWithConfirmation`
+ * stay separate underneath it because they are separately meaningful — one is a
+ * boundary and one is a preference — but a caller reaching for the boundary
+ * alone gets a session that never asks anybody anything, and that is not a
+ * mistake anyone would notice from the outside.
+ */
+export function decideForSession(profile: Profile, request: ToolRequest): Decision {
+  return decideWithConfirmation(profile, request, needsConfirmation(profile));
+}
+
+/**
  * The same decision, with anything the profile permits but an operator has asked
  * to be consulted about turned into a question.
  *

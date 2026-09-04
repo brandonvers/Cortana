@@ -216,6 +216,41 @@ describe('the profile, on its way to the provider', () => {
     return captured;
   }
 
+  it('hands the provider the profile as the list of tools that exist', async () => {
+    // The measurement that put this here: on 2026-09-02 a session under
+    // QUARANTINE called `ToolSearch` successfully and listed eighteen reachable
+    // tools, none of them in `KNOWN_TOOLS`. Withholding by name can only reach
+    // names this repository knows. This option is the allowlist, and the
+    // provider's own docs point at it from `allowedTools`.
+    expect((await optionsFor(QUARANTINE))['tools']).toEqual([]);
+    expect((await optionsFor({ ...QUARANTINE, tools: ['Read'] }))['tools']).toEqual(['Read']);
+  });
+
+  it('decides every tool call on both surfaces the provider offers', async () => {
+    const options = await optionsFor(QUARANTINE);
+
+    // `canUseTool` alone was measured never firing for `Read` — it is the *ask*
+    // surface, and a call the provider resolves on its own never reaches it. The
+    // hook fires where it does not, and both run the same decision.
+    expect(options['canUseTool']).toBeTypeOf('function');
+    const hooks = options['hooks'] as { PreToolUse: { hooks: unknown[] }[] };
+    expect(hooks.PreToolUse[0]?.hooks[0]).toBeTypeOf('function');
+  });
+
+  it('refuses a call through the hook, in the shape the provider reads', async () => {
+    const options = await optionsFor(QUARANTINE);
+    const hook = (
+      options['hooks'] as { PreToolUse: { hooks: ((i: unknown) => Promise<unknown>)[] }[] }
+    ).PreToolUse[0]?.hooks[0];
+
+    const outcome = (await hook?.({
+      tool_name: 'ToolSearch',
+      tool_input: { query: 'select:Read' },
+    })) as { hookSpecificOutput: { permissionDecision: string } };
+
+    expect(outcome.hookSpecificOutput.permissionDecision).toBe('deny');
+  });
+
   it('removes every tool the profile does not name', async () => {
     const options = await optionsFor(QUARANTINE);
     const deny = (options['settings'] as { permissions: { deny: string[] } }).permissions.deny;
@@ -237,6 +272,7 @@ describe('the profile, on its way to the provider', () => {
       denyRead: ['/srv/work/secrets'],
       network: 'denied',
       sandbox: 'required',
+      confirm: 'never',
     });
 
     // Spike 0010 measured the SDK's managed tier being dropped entirely on a

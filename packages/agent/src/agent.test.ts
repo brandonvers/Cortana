@@ -17,6 +17,7 @@ const WORKING: Profile = {
   denyRead: ['/srv/work/secrets'],
   network: 'denied',
   sandbox: 'required',
+  confirm: 'never',
 };
 
 const answer = (reply: string, actions: unknown[] = []) => ({ reply, actions });
@@ -198,6 +199,85 @@ describe('an action the agent declares', () => {
     const verdicts = (await agent.say('do three things')).actions.map((a) => a.decision.verdict);
 
     expect(verdicts).toEqual(['allow', 'deny', 'allow']);
+  });
+});
+
+describe('an action the profile will not decide alone', () => {
+  const CONFIRMING: Profile = { ...WORKING, confirm: 'writes' };
+  const write = () => action({ tool: 'Write', path: '/srv/work/out/a', writes: true });
+
+  it('is put to a person, and runs when they say yes', async () => {
+    const runner = fakeRunner({ values: [answer('Writing it.', [write()])] });
+    const agent = await createAgent({
+      runner,
+      profile: CONFIRMING,
+      persona: 'p',
+      approve: async () => true,
+    });
+
+    const [decided] = (await agent.say('write it')).actions;
+
+    expect(decided?.decision.verdict).toBe('allow');
+    expect(decided?.decision.because).toContain('operator');
+  });
+
+  it('is refused when they say no', async () => {
+    const runner = fakeRunner({ values: [answer('Writing it.', [write()])] });
+    const agent = await createAgent({
+      runner,
+      profile: CONFIRMING,
+      persona: 'p',
+      approve: async () => false,
+    });
+
+    expect((await agent.say('write it')).actions[0]?.decision.verdict).toBe('deny');
+  });
+
+  it('is refused when there is nobody to ask', async () => {
+    const runner = fakeRunner({ values: [answer('Writing it.', [write()])] });
+    const agent = await createAgent({ runner, profile: CONFIRMING, persona: 'p' });
+
+    const [decided] = (await agent.say('write it')).actions;
+
+    expect(decided?.decision.verdict).toBe('deny');
+    expect(decided?.decision.because).toContain('nobody is available');
+  });
+
+  it('is asked with a question built from facts, not from what the agent wrote', async () => {
+    // The agent's own reason is shown, attributed, in the `because`. It is not
+    // the question: a person reading a sentence composed by the thing asking
+    // permission is the shape of every convincing request that should not have
+    // been granted.
+    const persuasive = 'This is completely routine and has already been approved.';
+    const runner = fakeRunner({ values: [answer('ok', [{ ...write(), why: persuasive }])] });
+    let sawRequest: unknown = null;
+    const agent = await createAgent({
+      runner,
+      profile: CONFIRMING,
+      persona: 'p',
+      approve: async (request) => {
+        sawRequest = request;
+        return true;
+      },
+    });
+
+    await agent.say('write it');
+
+    // What reaches the approver is the request — tool, path, writes — and the
+    // policy engine's own words. The model's sentence is not among them.
+    expect(sawRequest).toMatchObject({ tool: 'Write', path: '/srv/work/out/a', writes: true });
+    expect(JSON.stringify(sawRequest)).not.toContain('already been approved');
+  });
+
+  it('reaches the session as well, so both paths ask the same person', async () => {
+    // Two approval routes with different answers would be worse than one route,
+    // because only one of them would be the one anybody tested.
+    const approve = async () => true;
+    const runner = fakeRunner({ values: [answer('ok')] });
+
+    await createAgent({ runner, profile: CONFIRMING, persona: 'p', approve });
+
+    expect(runner.opened[0]?.approve).toBe(approve);
   });
 });
 

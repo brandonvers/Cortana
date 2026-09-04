@@ -1,5 +1,5 @@
 import type { SessionId } from '@cortana/core';
-import type { Profile } from '@cortana/policy';
+import type { Decision, Profile, ToolRequest } from '@cortana/policy';
 import type { ZodType } from 'zod';
 
 /**
@@ -41,7 +41,31 @@ export interface SessionSpec {
    * of the two layers CONCEPTS §7 requires; the first is `decide`.
    */
   readonly profile: Profile;
+  /**
+   * How a call the profile will not decide alone is put to a person.
+   *
+   * Optional, and its absence is a refusal rather than a permission: a session
+   * with nobody to ask cannot ask, so `ask` becomes `deny`. That direction is
+   * the only safe one, and it also makes a missing wiring visible — the calls
+   * that should have been questions come back refused, in the log, instead of
+   * quietly running.
+   *
+   * It is on the spec rather than on the runner because it is per session. The
+   * person answering for a conversation on a socket is not the person answering
+   * for a scheduled job at four in the morning, and there may be nobody at all.
+   */
+  readonly approve?: Approve;
 }
+
+/**
+ * Puts one permitted-but-confirmable call to a person and waits for the answer.
+ *
+ * **It must always settle.** M3's definition of done says an approval nobody
+ * answers must not wedge the daemon, and the only answer to an unanswered
+ * question about doing something is no. Whoever implements this owns the
+ * timeout; the adapter calling it does not get to wait forever on their behalf.
+ */
+export type Approve = (request: ToolRequest, decision: Decision) => Promise<boolean>;
 
 /**
  * What a turn cost, as reported.

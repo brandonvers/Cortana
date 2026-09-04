@@ -60,6 +60,22 @@ export function readDenyRule(absolutePath: string): string {
 }
 
 export interface ProviderSettings {
+  /**
+   * The base set of built-in tools this session gets at all.
+   *
+   * This is the allowlist, and it is the difference between a profile that
+   * describes containment and one that is containment. Everything else here
+   * withholds tools **by name**, which can only reach names this file knows: on
+   * 2026-09-02 a session under `QUARANTINE` — no tools, nothing readable, no
+   * network — was measured calling `ToolSearch` successfully, and listing
+   * eighteen reachable tools of which `KNOWN_TOOLS` named none.
+   *
+   * The provider documents the fix in the option it points to from
+   * `allowedTools`: "To restrict which tools are available, use the `tools`
+   * option instead", where an empty array disables every built-in tool. A
+   * profile's `tools` field is that list and always was.
+   */
+  readonly tools: readonly string[];
   readonly permissions: { readonly deny: readonly string[]; readonly allow: readonly string[] };
   readonly sandbox: Record<string, unknown>;
   readonly strictMcpConfig: boolean;
@@ -155,7 +171,15 @@ export function settingsFor(profile: Profile): ProviderSettings {
         };
 
   return {
+    tools: [...profile.tools],
     permissions: {
+      // Kept alongside `tools`, not replaced by it. The allowlist decides what
+      // exists; these bare names are a second statement of the same thing for
+      // the tools this adapter knows about, and spike 0011 measured them
+      // removing a tool rather than gating it. Two mechanisms saying the same
+      // thing is this project's rule, not redundancy: `tools` is one option on
+      // one call, and an option that stops being honoured is a silent failure
+      // of exactly the kind the probe above found.
       deny: [...withheld, ...denyReadRules],
       // Deliberately empty. An allow list here would auto-approve before the
       // permission callback runs — the SDK warns about the shadowing — and a
