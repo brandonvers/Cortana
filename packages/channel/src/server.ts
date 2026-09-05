@@ -27,7 +27,7 @@
 import { chmodSync, mkdirSync, unlinkSync } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { dirname, join } from 'node:path';
-import { AppError, type Logger, PRODUCT_NAME } from '@cortana/core';
+import { AppError, isAppError, type Logger, PRODUCT_NAME } from '@cortana/core';
 import {
   type ClientFrame,
   encode,
@@ -170,7 +170,16 @@ export function createChannel(options: ChannelOptions): Channel {
         send({ type: 'reply', id: frame.id, text: await options.onSay(frame.text, conversation) });
       } catch (error) {
         log?.error('a turn failed', { error: String(error) });
-        send({ type: 'error', id: frame.id, message: String(error) });
+        // The message, not `String(error)`, which prefixes it with the class
+        // name — and the client then prefixed that again, so the operator read
+        // "AppError: the daemon could not answer: AppError: …" before reaching
+        // anything about what went wrong.
+        send({
+          type: 'error',
+          id: frame.id,
+          message: isAppError(error) ? error.message : String(error),
+          ...(isAppError(error) ? { category: error.category } : {}),
+        });
       }
     };
 

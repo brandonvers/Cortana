@@ -123,6 +123,20 @@ export function totalCostFrom(result: ProviderResult, previous: number): number 
  * like, it names nothing about that cause, and a vague prompt produces the same
  * symptom for an entirely different reason. Both belong in the message, because
  * whoever reads it at the time will not have the ADR open.
+ *
+ * ## The provider's own sentence comes first, and did not used to
+ *
+ * A failure sets `is_error` and leaves `subtype` at **`success`**, putting the
+ * reason in `result` — where an earlier version of this function ignored it and
+ * printed the subtype. The daemon on the deployment target then reported:
+ *
+ *     the provider ended the turn with "success"
+ *
+ * which is not an explanation, is barely a sentence, and discards the only
+ * string that told the operator what to do. Measured on 2026-09-05 by running a
+ * turn with no credentials: `{ subtype: 'success', is_error: true, result: 'Not
+ * logged in · Please run /login' }`. That message travels now, and the mapped
+ * explanations above are additions to it rather than replacements for it.
  */
 export function failureFrom(result: ProviderResult): AppError | null {
   const subtype = typeof result.subtype === 'string' ? result.subtype : 'unknown';
@@ -138,15 +152,23 @@ export function failureFrom(result: ProviderResult): AppError | null {
       'the provider gave up trying to produce a value matching the schema',
   };
 
-  const detail = explanations[subtype];
-  return new AppError(
-    `the provider ended the turn with "${subtype}"${detail ? ` — ${detail}` : ''}`,
-    {
-      category: 'provider',
-      code: 'turn-failed',
-      detail: { subtype, turns: asCount(result.num_turns) },
-    },
-  );
+  // Trimmed and bounded. It is the provider's text and it goes in an error
+  // message, a log line and an audit row; a runaway one would be all three.
+  const said = typeof result.result === 'string' ? result.result.trim().slice(0, 500) : '';
+  const explanation = explanations[subtype];
+
+  // The provider's own words lead when it gave any, because they are the only
+  // part of this that is about what actually happened. The subtype follows in
+  // parentheses for whoever is matching on it, and is not the whole message.
+  const description = said
+    ? `${said} (the provider reported "${subtype}")`
+    : `the provider ended the turn with "${subtype}"`;
+
+  return new AppError(`${description}${explanation ? ` — ${explanation}` : ''}`, {
+    category: 'provider',
+    code: 'turn-failed',
+    detail: { subtype, turns: asCount(result.num_turns) },
+  });
 }
 
 /** The provider's usage payload, narrowed to what this adapter reads. */

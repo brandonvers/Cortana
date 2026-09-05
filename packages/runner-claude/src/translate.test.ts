@@ -327,3 +327,48 @@ describe('telling headroom from a warning', () => {
     }
   });
 });
+
+describe('a failure the provider explained', () => {
+  it('leads with what the provider said', () => {
+    // Measured on 2026-09-05, running a turn with no credentials:
+    // { subtype: 'success', is_error: true, result: 'Not logged in · Please run /login' }.
+    // A failure sets is_error and leaves subtype at "success", so a message built
+    // from the subtype alone reads "the provider ended the turn with success" —
+    // not an explanation, and it discards the one string an operator can act on.
+    const failure = failureFrom({
+      subtype: 'success',
+      is_error: true,
+      result: 'Not logged in · Please run /login',
+    });
+
+    expect(failure?.message).toMatch(/^Not logged in/);
+    expect(failure?.message).toContain('Please run /login');
+  });
+
+  it('keeps the subtype for whoever matches on it', () => {
+    const failure = failureFrom({ subtype: 'error_max_turns', is_error: true, result: 'gave up' });
+
+    expect(failure?.detail?.['subtype']).toBe('error_max_turns');
+    // And the mapped explanation is an addition to the provider's words rather
+    // than a replacement for them.
+    expect(failure?.message).toContain('gave up');
+    expect(failure?.message).toContain('ran out of turns');
+  });
+
+  it('still says something when the provider said nothing', () => {
+    const failure = failureFrom({ subtype: 'error_max_budget_usd', is_error: true });
+
+    expect(failure?.message).toContain('error_max_budget_usd');
+    expect(failure?.message).toContain('cost ceiling');
+  });
+
+  it('bounds what it repeats, since the text reaches a log and an audit row', () => {
+    const failure = failureFrom({ subtype: 'success', is_error: true, result: 'x'.repeat(5_000) });
+
+    expect(failure?.message.length).toBeLessThan(700);
+  });
+
+  it('is still null for a turn that actually succeeded', () => {
+    expect(failureFrom({ subtype: 'success', is_error: false, result: 'fine' })).toBeNull();
+  });
+});
