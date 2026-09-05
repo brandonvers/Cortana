@@ -23,6 +23,8 @@
  * else dies.
  */
 
+import type { ErrorCategory } from '@cortana/core';
+
 /** The most a single frame may be, before the connection is closed for it. */
 export const MAX_FRAME_BYTES = 1_048_576;
 
@@ -42,7 +44,24 @@ export type ServerFrame =
       /** Why it is being asked, from the policy engine's own words. */
       readonly because: string;
     }
-  | { readonly type: 'error'; readonly id: string; readonly message: string };
+  | {
+      readonly type: 'error';
+      readonly id: string;
+      readonly message: string;
+      /**
+       * What kind of failure it was, when the daemon knew.
+       *
+       * Here because the alternative is a client that has to invent one. The
+       * first version rebuilt every remote failure as `internal` — "a defect in
+       * this code" — for errors that were nothing of the sort: a daemon that is
+       * not logged in is the operator's to fix, and a client saying its own code
+       * is broken sends them to read the wrong file.
+       *
+       * Optional, so an older daemon or a failure that was never an `AppError`
+       * simply carries no claim rather than a wrong one.
+       */
+      readonly category?: ErrorCategory;
+    };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

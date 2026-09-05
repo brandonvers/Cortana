@@ -50,8 +50,25 @@ const client = await connect({
   throw error;
 });
 
+/**
+ * One message, and its answer — or the reason there was not one.
+ *
+ * A failed turn is an error frame, which is correct: the turn failed. It is not
+ * a reason to end this process with a stack trace naming lines in `client.ts`,
+ * because the person's problem is never in `client.ts`. The daemon on the
+ * deployment target reported "Not logged in · Please run /login" and this
+ * printed seven frames of an async iterator instead.
+ */
 async function ask(text: string): Promise<void> {
-  process.stdout.write(`${await client.say(text)}\n`);
+  try {
+    process.stdout.write(`${await client.say(text)}\n`);
+  } catch (error) {
+    if (isAppError(error)) {
+      process.stdout.write(`! ${error.message}\n`);
+      return;
+    }
+    throw error;
+  }
 }
 
 if (lines.length > 0) {

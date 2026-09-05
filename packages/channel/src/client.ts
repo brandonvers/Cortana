@@ -104,8 +104,13 @@ export async function connect(options: ClientOptions): Promise<Client> {
           if (frame.type === 'reply') resolve(frame.text);
           else if (frame.type === 'error') {
             reject(
-              new AppError(`the daemon could not answer: ${frame.message}`, {
-                category: 'internal',
+              // The daemon's own sentence, unwrapped. Prefixing it buried the
+              // part that mattered behind two class names and a clause about
+              // this client, and the category is the daemon's rather than a
+              // guess: `internal` here told operators their code was broken
+              // when the daemon simply was not logged in.
+              new AppError(frame.message, {
+                category: frame.category ?? 'internal',
                 code: 'channel-turn-failed',
               }),
             );

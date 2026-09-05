@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isAppError } from '@cortana/core';
+import { AppError, isAppError } from '@cortana/core';
 import { recordingLogger } from '@cortana/core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { approvalThrough, questionFor } from './approval.ts';
@@ -344,5 +344,60 @@ describe('a data directory too deep to hold a socket', () => {
     channel = createChannel({ dataDir: padded, onSay: async () => 'hi' });
 
     await expect(channel.start()).resolves.toBeUndefined();
+  });
+});
+
+describe('a turn that failed on the daemon', () => {
+  it('reaches the client as the daemon said it, not wrapped twice', async () => {
+    // What an operator on the deployment target actually read:
+    //   AppError: the daemon could not answer: AppError: the provider ended…
+    // Two class names and a clause about the client before anything about the
+    // failure. The daemon's sentence is the message now.
+    channel = createChannel({
+      dataDir,
+      onSay: async () => {
+        throw new AppError('Not logged in · Please run /login', {
+          category: 'config',
+          code: 'turn-failed',
+        });
+      },
+    });
+    await channel.start();
+
+    const client = await connect({ path: socketPathFor(dataDir), onAsk: async () => false });
+    try {
+      await expect(client.say('hello')).rejects.toSatisfy((error: unknown) => {
+        if (!isAppError(error)) return false;
+        expect(error.message).toBe('Not logged in · Please run /login');
+        // The daemon's category, not one the client invented. `internal` here
+        // told an operator their own code was broken when it was not.
+        expect(error.category).toBe('config');
+        return true;
+      });
+    } finally {
+      client.close();
+    }
+  });
+
+  it('claims no category at all when the failure was not one of ours', async () => {
+    channel = createChannel({
+      dataDir,
+      onSay: async () => {
+        throw new TypeError('something else entirely');
+      },
+    });
+    await channel.start();
+
+    const client = await connect({ path: socketPathFor(dataDir), onAsk: async () => false });
+    try {
+      await expect(client.say('hello')).rejects.toSatisfy(
+        (error: unknown) =>
+          isAppError(error) &&
+          error.category === 'internal' &&
+          error.message.includes('something else entirely'),
+      );
+    } finally {
+      client.close();
+    }
   });
 });
