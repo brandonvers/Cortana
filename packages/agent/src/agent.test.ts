@@ -269,15 +269,84 @@ describe('an action the profile will not decide alone', () => {
     expect(JSON.stringify(sawRequest)).not.toContain('already been approved');
   });
 
+  it('can be given per turn, because an agent outlives the connections to it', async () => {
+    // The session's own approver is fixed when the session opens. A person at a
+    // socket is not, and the one waiting for this answer is not necessarily the
+    // one who opened the connection an hour ago.
+    const runner = fakeRunner({ values: [answer('ok', [write()]), answer('ok', [write()])] });
+    const agent = await createAgent({
+      runner,
+      profile: CONFIRMING,
+      persona: 'p',
+      approve: async () => false,
+    });
+
+    const refused = await agent.say('one');
+    const allowed = await agent.say('two', async () => true);
+
+    expect(refused.actions[0]?.decision.verdict).toBe('deny');
+    expect(allowed.actions[0]?.decision.verdict).toBe('allow');
+  });
+
+  it('applies to the turn that asked for it, however long it waited', async () => {
+    // Captured when `say` is called and applied when the turn runs. Two queued
+    // turns with different approvers must not both use the last one.
+    const runner = slowedBy(
+      [20, 0],
+      fakeRunner({ values: [answer('ok', [write()]), answer('ok', [write()])] }),
+    );
+    const agent = await createAgent({ runner, profile: CONFIRMING, persona: 'p' });
+
+    const [first, second] = await Promise.all([
+      agent.say('one', async () => true),
+      agent.say('two', async () => false),
+    ]);
+
+    expect(first?.actions[0]?.decision.verdict).toBe('allow');
+    expect(second?.actions[0]?.decision.verdict).toBe('deny');
+  });
+
   it('reaches the session as well, so both paths ask the same person', async () => {
     // Two approval routes with different answers would be worse than one route,
     // because only one of them would be the one anybody tested.
-    const approve = async () => true;
+    //
+    // Asserted by calling what the session was given rather than by comparing
+    // it to what was passed in: the session gets a stable wrapper, because its
+    // own approver is fixed for its life and the person answering is not.
+    let asked = false;
     const runner = fakeRunner({ values: [answer('ok')] });
+    const agent = await createAgent({
+      runner,
+      profile: CONFIRMING,
+      persona: 'p',
+      approve: async () => {
+        asked = true;
+        return true;
+      },
+    });
+    await agent.say('anything');
 
-    await createAgent({ runner, profile: CONFIRMING, persona: 'p', approve });
+    const allowed = await runner.opened[0]?.approve?.(
+      { tool: 'Write', path: '/srv/work/out/a', writes: true },
+      { verdict: 'ask', because: 'confirmed before it runs' },
+    );
 
-    expect(runner.opened[0]?.approve).toBe(approve);
+    expect(asked).toBe(true);
+    expect(allowed).toBe(true);
+  });
+
+  it('refuses through that wrapper when nobody is asking', async () => {
+    // The wrapper is always installed, so "nobody to ask" is decided here where
+    // the reason is legible, rather than in the adapter.
+    const runner = fakeRunner({ values: [answer('ok')] });
+    await createAgent({ runner, profile: CONFIRMING, persona: 'p' });
+
+    const allowed = await runner.opened[0]?.approve?.(
+      { tool: 'Write', path: '/srv/work/out/a', writes: true },
+      { verdict: 'ask', because: 'confirmed before it runs' },
+    );
+
+    expect(allowed).toBe(false);
   });
 });
 

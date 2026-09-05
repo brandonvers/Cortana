@@ -16,6 +16,14 @@ beforeEach(() => {
     dataDir: join(root, 'state'),
     log: { level: 'info' },
     audit: { retentionDays: 90 },
+    agent: {
+      persona: 'You are Cortana.',
+      tier: 'balanced',
+      tools: [],
+      readable: [],
+      writable: [],
+      confirm: 'writes',
+    },
     shutdown: { timeoutMs: 5_000 },
   };
 });
@@ -97,6 +105,11 @@ describe('stopping in the order that matters', () => {
 
     expect(report.clean).toBe(true);
     expect(report.components.map((c) => c.name)).toEqual([
+      // The socket first: nothing new arrives while the rest is coming down.
+      'channel',
+      // Then the session, because a turn in flight is a write that has not
+      // happened yet, and the writer is still two entries below.
+      'agent',
       'instance-record',
       'bus',
       'writer',
@@ -149,7 +162,9 @@ describe('health', () => {
 
     expect(report.status).toBe('ok');
     expect(report.components.map((c) => c.name).sort()).toEqual([
+      'agent',
       'bus',
+      'channel',
       'instance-record',
       'storage',
       'writer',

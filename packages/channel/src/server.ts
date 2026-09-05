@@ -41,6 +41,26 @@ const SOCKET_NAME = `${PRODUCT_NAME.toLowerCase()}.sock`;
 
 export const socketPathFor = (dataDir: string): string => join(dataDir, SOCKET_NAME);
 
+/**
+ * How long a unix socket path may be, which is shorter than anyone expects.
+ *
+ * The address is a fixed-size `sun_path` in a C struct, not a string: 104 bytes
+ * on macOS and BSD, 108 on Linux, minus the terminator. Exceed it and `listen`
+ * fails with **`EINVAL: invalid argument`** — a message that names neither the
+ * path nor the length nor the limit, on a call that looks like it should have
+ * worked.
+ *
+ * The macOS figure is measured on this project's development machine rather than
+ * read from a header: 104 characters listened, 105 returned `EINVAL`. The Linux
+ * figure is from `sys/un.h` and is **not** measured here; it is the larger of the
+ * two, so a path this refuses on macOS would be refused there as well only if it
+ * also exceeds 107.
+ *
+ * This is not a hypothetical. It is how the first assembled daemon failed to
+ * start, on a data directory under a temporary path.
+ */
+export const MAX_SOCKET_PATH_BYTES = process.platform === 'darwin' ? 104 : 107;
+
 export interface Conversation {
   /**
    * Puts a question to whoever is connected, and waits.
@@ -197,6 +217,22 @@ export function createChannel(options: ChannelOptions): Channel {
     },
 
     async start(): Promise<void> {
+      const length = Buffer.byteLength(path, 'utf8');
+      if (length > MAX_SOCKET_PATH_BYTES) {
+        // Checked here rather than left to `listen`, because `EINVAL` names
+        // nothing and the operator's fix is one specific setting.
+        throw new AppError(
+          `the socket path is ${length} bytes and the operating system allows ` +
+            `${MAX_SOCKET_PATH_BYTES}. Set a shorter data directory: the socket lives inside it, ` +
+            `and this one is ${path}`,
+          {
+            category: 'config',
+            code: 'channel-path-too-long',
+            detail: { path, length, limit: MAX_SOCKET_PATH_BYTES },
+          },
+        );
+      }
+
       mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 
       if (await isLive(path)) {

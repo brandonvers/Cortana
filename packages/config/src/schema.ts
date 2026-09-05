@@ -22,6 +22,16 @@ export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] a
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
 /**
+ * Repeated here rather than imported from `@cortana/runner`.
+ *
+ * This package is what every other one reads its settings through, and it holds
+ * no dependency on anything that could pull a provider in behind it. Three
+ * strings are cheaper than that edge, and a test in `@cortana/kernel` — which
+ * already depends on both — fails if the two lists ever disagree.
+ */
+export const MODEL_TIERS = ['fast', 'balanced', 'deep'] as const;
+
+/**
  * The object is strict: an unrecognised key is an error rather than something
  * ignored. A misspelled setting that silently does nothing is the worst outcome
  * available, because the system starts, looks configured, and behaves as though
@@ -54,6 +64,40 @@ export const configSchema = z.strictObject({
      * own machine.
      */
     retentionDays: z.int().min(0).max(3_650),
+  }),
+
+  agent: z.strictObject({
+    /**
+     * Who the one agent is. Its competence and its character, in its own words.
+     *
+     * The only half of a system prompt a person writes: what it may do is
+     * composed from the profile below, and neither half is a security control.
+     */
+    persona: z.string().min(1),
+    tier: z.enum(MODEL_TIERS),
+    /**
+     * What it may reach for. **Empty by default, and that is the safe default
+     * rather than a placeholder.**
+     *
+     * M3 has one agent that talks and remembers nothing, so a tool granted here
+     * is a capability nobody has asked for yet. Granting one also turns the
+     * sandbox on — `workingProfile` derives that rather than taking it, so the
+     * two cannot drift apart.
+     *
+     * When the roster arrives in M4 this moves into an agent definition, where
+     * it belongs. It is here now because the alternative is an assembled daemon
+     * whose approval path cannot be reached.
+     */
+    tools: z.array(z.string().min(1)),
+    readable: z.array(z.string().refine(isAbsolute, { error: 'must be an absolute path' })),
+    writable: z.array(z.string().refine(isAbsolute, { error: 'must be an absolute path' })),
+    /**
+     * Which permitted calls are still put to whoever is connected.
+     *
+     * `writes` treats modification and egress as one question, because from an
+     * operator's side they are one question: is this irreversible?
+     */
+    confirm: z.enum(['never', 'writes', 'always']),
   }),
 
   shutdown: z.strictObject({

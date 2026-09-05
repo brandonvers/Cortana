@@ -1,6 +1,6 @@
 # M3 — the conversation
 
-**Status:** Proposed
+**Status:** Done
 **Date:** 2026-09-02
 **Version target:** `0.3.0`
 
@@ -23,7 +23,7 @@ can act.** Five spikes exist for it and none of their findings is optional.
 
 ## Definition of done
 
-- [ ] You can hold a conversation with it over a local socket, from the machine
+- [x] You can hold a conversation with it over a local socket, from the machine
       it runs on, and it remembers the conversation within a session
 - [x] **Every crossing from the model back into the kernel carries a schema**
       ([ADR-0015](../adr/0015-structured-output-at-the-model-boundary.md)), and
@@ -40,7 +40,7 @@ can act.** Five spikes exist for it and none of their findings is optional.
 - [x] **The path form in a deny rule is verified, not assumed.** Spike 0011
       measured `Read(//abs/**)` holding and `Read(/abs/**)` leaking four times
       out of four
-- [ ] A conversation survives the daemon restarting: what was said is in the
+- [x] A conversation survives the daemon restarting: what was said is in the
       audit, and the socket comes back
 - [x] An approval you never answer does not wedge the daemon
 
@@ -161,7 +161,11 @@ itself is permitted to be the only thing standing between it and a file.
 | The module host | M7 |
 
 **No memory is the sharpest limit and worth stating plainly**: M3 answers you and
-forgets. That is not a defect of the milestone, it is the shape of it — but it
+forgets. Asked after a restart whether it remembered the previous conversation,
+the assembled daemon said so itself — *"each conversation starts fresh for me,
+and I have no tools or stored history available to check"* — which is the
+milestone behaving correctly and reading like a defect, and is the reason this
+paragraph is here. That is not a defect of the milestone, it is the shape of it — but it
 means the thing you can finally use will not know yesterday, and the milestone
 that fixes that is [blocked on a corpus](../spikes/README.md#outstanding) only
 you can produce.
@@ -175,6 +179,13 @@ hand, on the machine that is authenticated.
 ```bash
 node packages/runner-claude/src/contract.manual.ts   # the port, 13 cases
 node packages/runner-claude/src/escape.manual.ts     # spike 0011's escape test
+```
+
+And to talk to a running daemon, which needs a provider but is not a check:
+
+```bash
+node packages/channel/src/talk.manual.ts             # a line at a time
+node packages/channel/src/talk.manual.ts "hello"     # or one shot
 ```
 
 The escape test **runs its positive control first and refuses to report on the

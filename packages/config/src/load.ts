@@ -62,6 +62,8 @@ const BINDINGS: readonly Binding[] = [
       return Number.isFinite(value) ? value : raw;
     },
   },
+  { name: 'AGENT_PERSONA', path: ['agent', 'persona'] },
+  { name: 'AGENT_TIER', path: ['agent', 'tier'] },
   {
     name: 'SHUTDOWN_TIMEOUT_MS',
     path: ['shutdown', 'timeoutMs'],
@@ -107,6 +109,16 @@ function defaults(env: Env): Tree {
     dataDir: defaultDataDir(env),
     log: { level: 'info' },
     audit: { retentionDays: 90 },
+    agent: {
+      // Deliberately plain. A persona is the operator's to write, and a default
+      // full of personality is one they have to undo rather than fill in.
+      persona: 'You are Cortana, a careful assistant running on this machine.',
+      tier: 'balanced',
+      tools: [],
+      readable: [],
+      writable: [],
+      confirm: 'writes',
+    },
     shutdown: { timeoutMs: 15_000 },
   };
 }

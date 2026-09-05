@@ -230,6 +230,48 @@ export function quarantineProfile(options: QuarantineOptions): Profile {
  */
 export const QUARANTINE: Profile = quarantineProfile({ source: 'unattributed' });
 
+export interface WorkingOptions {
+  readonly name: string;
+  readonly tools?: readonly string[];
+  readonly readable?: readonly string[];
+  readonly writable?: readonly string[];
+  readonly denyRead?: readonly string[];
+  readonly network?: 'allowed' | 'denied';
+  readonly confirm?: ConfirmPolicy;
+}
+
+/**
+ * The profile for an agent that works on the owner's behalf.
+ *
+ * Generated for the same reason the quarantine one is — nothing about
+ * containment should be typed out twice — but it makes a weaker claim, and the
+ * claim it makes is the coupling below rather than a list of invariants. A
+ * working profile is *supposed* to be able to do things; what it must not do is
+ * be able to do them without the sandbox.
+ *
+ * **Granting a tool requires a sandbox.** With `tools: []` the sandbox is moot —
+ * there is nothing to contain, and requiring one would refuse to start on a host
+ * that has none, for no benefit. The moment a tool is granted that stops being
+ * true, and the danger is that nobody notices: the setting that was harmless
+ * when it was written is a hole after somebody adds one line elsewhere. So the
+ * requirement is derived from the tools rather than configured beside them.
+ */
+export function workingProfile(options: WorkingOptions): Profile {
+  const tools = [...(options.tools ?? [])];
+  return {
+    name: options.name,
+    trust: 'owner',
+    tools,
+    readable: [...(options.readable ?? [])],
+    writable: [...(options.writable ?? [])],
+    denyRead: [...(options.denyRead ?? [])],
+    network: options.network ?? 'denied',
+    // Derived, never passed in. See above.
+    sandbox: tools.length === 0 ? 'none' : 'required',
+    confirm: options.confirm ?? 'writes',
+  };
+}
+
 /**
  * Narrows a profile to untrusted, and never the other way.
  *

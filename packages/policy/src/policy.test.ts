@@ -14,6 +14,7 @@ import {
   type Profile,
   QUARANTINE,
   quarantineProfile,
+  workingProfile,
 } from './profile.ts';
 
 const WORKING: Profile = {
@@ -330,5 +331,37 @@ describe('the generated quarantine profile', () => {
     for (const invariant of CONTAINMENT_INVARIANTS) {
       expect(invariant.because.length).toBeGreaterThan(40);
     }
+  });
+});
+
+describe('the generated profile for an agent that works', () => {
+  it('leaves the sandbox off when there is nothing to contain', () => {
+    // Requiring one here would refuse to start on a host without bubblewrap for
+    // no benefit: with no tools, nothing ever runs inside it.
+    expect(workingProfile({ name: 'main' }).sandbox).toBe('none');
+  });
+
+  it('turns the sandbox on the moment a tool is granted', () => {
+    // Derived rather than configured beside the tools, so the two cannot drift.
+    // The danger is not somebody choosing wrongly — it is that the setting which
+    // was harmless when it was written becomes a hole after one line changes
+    // somewhere else.
+    expect(workingProfile({ name: 'main', tools: ['Read'] }).sandbox).toBe('required');
+  });
+
+  it('has no way to ask for tools without one', () => {
+    // There is no sandbox option on `WorkingOptions` at all. This asserts the
+    // absence, since a later addition would compile and quietly reopen it.
+    const asAny = workingProfile as unknown as (options: Record<string, unknown>) => Profile;
+
+    expect(asAny({ name: 'main', tools: ['Bash'], sandbox: 'none' }).sandbox).toBe('required');
+  });
+
+  it("confirms writes unless told otherwise, and works on the owner's behalf", () => {
+    const profile = workingProfile({ name: 'main' });
+
+    expect(profile.confirm).toBe('writes');
+    expect(profile.trust).toBe('owner');
+    expect(profile.network).toBe('denied');
   });
 });
