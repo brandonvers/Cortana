@@ -62,6 +62,25 @@ around it can distract from what it does.
 **1. Definitions, and the roster that holds them.** Files parsed and validated,
 the runtime state in the database, and the two kept apart. Nothing runs yet.
 
+> Definitions are **markdown with TOML frontmatter**, fenced by `+++`, named by
+> their filename. TOML because the configuration file already is one and
+> `smol-toml` is already here — YAML would be a new dependency, in the package
+> that parses files a module may ship, for a format whose implicit typing has a
+> long history of reading a value as something other than what was written. The
+> filename is the name because a name written twice drifts, and then one of them
+> is wrong in a way nothing detects.
+
+```markdown
++++
+description = "Reads and triages the mailbox"
+tier = "fast"
+tools = ["Read"]
+readable = ["/srv/mail"]
++++
+
+You are the mail specialist. You are terse.
+```
+
 **2. Dormancy.** The state machine from
 [ADR-0006](../adr/0006-dormancy-is-the-default.md), waking, the idle TTL, and a
 test that a dormant agent holds no session. This is where spike 0003's numbers

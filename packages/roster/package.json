@@ -1,0 +1,23 @@
+{
+  "name": "@cortana/roster",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Who the agents are: their definitions, where those come from, and what each one is allowed to do.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@cortana/core": "workspace:*",
+    "@cortana/policy": "workspace:*",
+    "@cortana/runner": "workspace:*",
+    "@cortana/storage": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "smol-toml": "^1.8.0",
+    "zod": "^4.5.4"
+  }
+}
