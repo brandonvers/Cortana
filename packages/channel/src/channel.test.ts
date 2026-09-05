@@ -7,7 +7,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { approvalThrough, questionFor } from './approval.ts';
 import { connect } from './client.ts';
 import { MAX_FRAME_BYTES, parseClientFrame } from './protocol.ts';
-import { type Channel, createChannel, type SayHandler, socketPathFor } from './server.ts';
+import {
+  type Channel,
+  createChannel,
+  MAX_SOCKET_PATH_BYTES,
+  type SayHandler,
+  socketPathFor,
+} from './server.ts';
 
 let root: string;
 let dataDir: string;
@@ -303,5 +309,40 @@ describe('turning a decision into a question for a person', () => {
         },
       ),
     ).resolves.toBe(false);
+  });
+});
+
+describe('a data directory too deep to hold a socket', () => {
+  it('says which setting is wrong, rather than passing on EINVAL', async () => {
+    // How the first assembled daemon failed to start. The address is a
+    // fixed-size field in a C struct, and `listen` reports a path that is too
+    // long as "invalid argument" — naming neither the path, the length, nor the
+    // limit.
+    const deep = join(root, 'x'.repeat(MAX_SOCKET_PATH_BYTES));
+    const tooLong = createChannel({ dataDir: deep, onSay: async () => 'hi' });
+
+    await expect(tooLong.start()).rejects.toSatisfy(
+      (error: unknown) =>
+        isAppError(error) &&
+        error.category === 'config' &&
+        error.code === 'channel-path-too-long' &&
+        error.message.includes('shorter data directory'),
+    );
+  });
+
+  it('lets a path exactly at the limit through', async () => {
+    // The boundary is measured, not assumed: on this project's development
+    // machine 104 characters listened and 105 returned EINVAL. An off-by-one
+    // here refuses a path the operating system would have accepted.
+    // Adding a directory costs its name *and* a separator, which is the
+    // off-by-one this test was written with the first time.
+    const name = socketPathFor(root);
+    const room = MAX_SOCKET_PATH_BYTES - Buffer.byteLength(name, 'utf8') - 1;
+    if (room < 1) return; // The test's own temp path is already near the limit.
+
+    const padded = join(root, 'y'.repeat(room));
+    channel = createChannel({ dataDir: padded, onSay: async () => 'hi' });
+
+    await expect(channel.start()).resolves.toBeUndefined();
   });
 });

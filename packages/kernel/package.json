@@ -12,9 +12,14 @@
     "src"
   ],
   "dependencies": {
+    "@cortana/agent": "workspace:*",
+    "@cortana/audit": "workspace:*",
     "@cortana/bus": "workspace:*",
+    "@cortana/channel": "workspace:*",
     "@cortana/config": "workspace:*",
     "@cortana/core": "workspace:*",
+    "@cortana/policy": "workspace:*",
+    "@cortana/runner": "workspace:*",
     "@cortana/storage": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "pino": "^10.3.1"

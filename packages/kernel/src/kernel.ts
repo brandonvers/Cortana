@@ -25,6 +25,7 @@
  * opinion about processes.
  */
 
+import type { Agent } from '@cortana/agent';
 import type { Bus } from '@cortana/bus';
 import { createBus } from '@cortana/bus';
 import type { Config } from '@cortana/config';
@@ -45,6 +46,7 @@ import {
   type Writer,
 } from '@cortana/storage';
 import { eq } from 'drizzle-orm';
+import { conversationComponents, type OpenRunner } from './conversation.ts';
 import {
   type Component,
   createLifecycle,
@@ -74,6 +76,16 @@ export interface KernelOptions {
   /** Recorded against this run, so that "which build did that" has an answer. */
   readonly version: string;
   readonly clock?: Clock;
+  /**
+   * Opens the model runner, when something has chosen one.
+   *
+   * A function rather than an import, and optional rather than required.
+   * ADR-0001 keeps every provider name in one adapter package, so a kernel that
+   * imported one would make "which provider" a property of the kernel; and
+   * ADR-0020 makes the SDK an optional peer, so a kernel that required one would
+   * refuse to do everything it can still do without it.
+   */
+  readonly openRunner?: OpenRunner;
 }
 
 export interface RunningKernel {
@@ -82,6 +94,8 @@ export interface RunningKernel {
   readonly writer: Writer;
   readonly bus: Bus<KernelEvents>;
   readonly lifecycle: Lifecycle;
+  /** The one agent, once somebody has said something to it. */
+  agent(): Agent | null;
   health(): Promise<HealthReport>;
   stop(reason: string): Promise<StopReport>;
 }
@@ -187,8 +201,39 @@ export async function startKernel(options: KernelOptions): Promise<RunningKernel
     },
   };
 
+  /**
+   * Built before the lifecycle and started after everything durable.
+   *
+   * The writer and the instance id it needs are filled in by components above
+   * it, which is why this is a function of `parts` read at start time rather
+   * than values read now.
+   */
+  const conversation = conversationComponents({
+    config: options.config,
+    logger: log,
+    // Assigned by the writer component, which starts first. Read through a
+    // getter for the same reason `parts` exists at all: a value copied here
+    // would be the `undefined` it holds at this moment, permanently.
+    get writer(): Writer {
+      if (!parts.writer) throw new Error('the writer must start before the conversation');
+      return parts.writer;
+    },
+    instanceId,
+    ...(options.openRunner === undefined ? {} : { openRunner: options.openRunner }),
+  });
+
   const lifecycle = createLifecycle({
-    components: [storageComponent, writerComponent, busComponent, instanceComponent],
+    // The conversation comes last, so it is taken down first: the socket stops
+    // accepting messages before the instance record closes, and the agent's
+    // session closes before the writer drains — a turn in flight is a write
+    // that has not happened yet.
+    components: [
+      storageComponent,
+      writerComponent,
+      busComponent,
+      instanceComponent,
+      ...conversation.components,
+    ],
     logger: log,
     stopTimeoutMs: options.config.shutdown.timeoutMs,
     clock,
@@ -229,6 +274,7 @@ export async function startKernel(options: KernelOptions): Promise<RunningKernel
     writer,
     bus,
     lifecycle,
+    agent: () => conversation.current(),
     health: () => lifecycle.health(),
     stop: async (reason: string) => {
       // Published before the sequence runs, because the bus is one of the

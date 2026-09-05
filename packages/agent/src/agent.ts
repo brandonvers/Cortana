@@ -72,8 +72,15 @@ export interface Agent {
    *
    * Concurrent calls are queued rather than refused or interleaved — see the
    * note on ordering below.
+   *
+   * `approve` is **whoever is asking, this turn**, and it overrides the one the
+   * agent was built with. An agent outlives the connections to it: the person
+   * who opened the socket an hour ago is not necessarily the person waiting for
+   * this answer, and a session's own approver is fixed when the session opens
+   * and cannot be. Passing it per turn is what lets a question reach the person
+   * who caused it rather than the one who happened to be first.
    */
-  say(text: string): Promise<Exchange>;
+  say(text: string, approve?: Approve): Promise<Exchange>;
   /** Idempotent, like the session it closes. */
   stop(): Promise<void>;
 }
@@ -151,12 +158,27 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
   const log = options.logger?.child({ component: 'agent' });
   const tier = options.tier ?? 'balanced';
 
+  /**
+   * Who to ask during the turn that is running now.
+   *
+   * The session below is opened once and its approver is fixed for its life, so
+   * the stable function it gets reads this instead. Safe because turns are
+   * serialised: exactly one turn is in flight, so exactly one answer to "who is
+   * asking" is current. The queue was there before this and is now load-bearing
+   * for a second reason.
+   */
+  let asking: Approve | undefined = options.approve;
+
   const session: StructuredSession<AgentAnswer> = await runner.startStructured(
     {
       tier,
       systemPrompt: composePrompt({ persona: options.persona, profile }),
       profile,
-      ...(options.approve === undefined ? {} : { approve: options.approve }),
+      // Always supplied, and not conditional on there being anybody: with
+      // nobody, `asking` is undefined and this refuses. Passing no approver at
+      // all would mean the adapter refuses instead, which is the same answer
+      // reached somewhere the reason is harder to find.
+      approve: async (request, decision) => (await asking?.(request, decision)) ?? false,
     },
     agentAnswer,
   );
@@ -174,7 +196,7 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
   const settle = async (request: ToolRequest, decision: Decision): Promise<Decision> => {
     if (decision.verdict !== 'ask') return decision;
 
-    const approve = options.approve;
+    const approve = asking;
     if (approve === undefined) {
       return { verdict: 'deny', because: `${decision.because}, and nobody is available to ask` };
     }
@@ -199,7 +221,8 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
    */
   let tail: Promise<unknown> = Promise.resolve();
 
-  const runTurn = async (text: string): Promise<Exchange> => {
+  const runTurn = async (text: string, approve: Approve | undefined): Promise<Exchange> => {
+    asking = approve ?? options.approve;
     if (session.stopped) {
       throw new AppError('this agent has stopped and will not take another turn', {
         category: 'unavailable',
@@ -259,8 +282,10 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
       return session.stopped;
     },
 
-    say(text: string): Promise<Exchange> {
-      const next = tail.then(() => runTurn(text));
+    say(text: string, approve?: Approve): Promise<Exchange> {
+      // Captured now and applied when the turn runs, not when it was asked for.
+      // A queued turn belongs to whoever asked for it, however long it waited.
+      const next = tail.then(() => runTurn(text, approve));
       // The queue must not break on a failed turn, so what is chained on is a
       // promise that settles rather than the one handed back. Without this, one
       // rejection would leave every later `say` rejecting with an error from a

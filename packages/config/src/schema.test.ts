@@ -7,6 +7,14 @@ const VALID = {
   dataDir: '/var/lib/cortana',
   log: { level: 'info' },
   audit: { retentionDays: 90 },
+  agent: {
+    persona: 'You are Cortana.',
+    tier: 'balanced',
+    tools: [],
+    readable: [],
+    writable: [],
+    confirm: 'writes',
+  },
   shutdown: { timeoutMs: 15_000 },
 };
 
@@ -122,5 +130,33 @@ describe('audit retention', () => {
     expect(withRetention(-1)).toBe(false);
     expect(withRetention(3_651)).toBe(false);
     expect(withRetention(1.5)).toBe(false);
+  });
+});
+
+describe('the agent section', () => {
+  const agent = (over: Record<string, unknown>) =>
+    configSchema.safeParse({ ...VALID, agent: { ...VALID.agent, ...over } });
+
+  it('insists a persona says something', () => {
+    expect(agent({ persona: '' }).success).toBe(false);
+  });
+
+  it('accepts only tiers the port has', () => {
+    expect(agent({ tier: 'fast' }).success).toBe(true);
+    expect(agent({ tier: 'enormous' }).success).toBe(false);
+  });
+
+  it('refuses a relative path, which resolves against a directory nobody meant', () => {
+    // For a service the working directory is `/`. A relative path here is a
+    // permission granted somewhere other than where it was written.
+    expect(agent({ readable: ['/srv/work'] }).success).toBe(true);
+    expect(agent({ readable: ['work'] }).success).toBe(false);
+    expect(agent({ writable: ['relative/too'] }).success).toBe(false);
+  });
+
+  it('has no way to say "grant tools and skip the sandbox"', () => {
+    // There is no sandbox setting here at all, and that is the design:
+    // `workingProfile` derives it from the tools, so the two cannot drift.
+    expect(agent({ sandbox: 'none' }).success).toBe(false);
   });
 });

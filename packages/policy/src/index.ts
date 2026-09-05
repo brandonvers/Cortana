@@ -12,6 +12,7 @@ export type {
   Profile,
   QuarantineOptions,
   SandboxRequirement,
+  WorkingOptions,
 } from './profile.ts';
 export {
   CONTAINMENT_INVARIANTS,
@@ -19,4 +20,5 @@ export {
   downgraded,
   QUARANTINE,
   quarantineProfile,
+  workingProfile,
 } from './profile.ts';

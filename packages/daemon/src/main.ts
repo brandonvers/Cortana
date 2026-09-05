@@ -31,6 +31,7 @@ import {
   type RunningKernel,
   startKernel,
 } from '@cortana/kernel';
+import { createClaudeRunner } from '@cortana/runner-claude';
 import { EXIT, type ExitCode } from './exit.ts';
 import { type EarlySignals, type SignalWatch, watchForStop } from './signals.ts';
 
@@ -155,7 +156,21 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<ExitCode> 
     });
 
     announceSecretProtection(logger, probeThisMachine(existsSync, env));
-    kernel = await startKernel({ config: loaded.config, logger, version });
+    kernel = await startKernel({
+      config: loaded.config,
+      logger,
+      version,
+      // The one place a provider is chosen. ADR-0001 keeps the names in one
+      // adapter package and the kernel takes a function, so "which provider"
+      // is a property of the process rather than of the kernel — which is what
+      // makes a second adapter a matter of editing this line.
+      //
+      // Not called here: `createClaudeRunner` loads an optional peer dependency
+      // (ADR-0020), and a daemon that resolved it at boot would refuse to start
+      // on a machine that has not installed it, rather than doing everything it
+      // can still do without one.
+      openRunner: () => createClaudeRunner({ logger }),
+    });
   } catch (error) {
     watch?.dispose();
     return reportStartupFailure(error, errors);
