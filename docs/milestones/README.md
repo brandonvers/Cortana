@@ -14,7 +14,7 @@ is corrected in place and the correction says what changed.
 | M1 | Kernel skeleton | [m1-kernel-skeleton.md](m1-kernel-skeleton.md) |
 | M2 | Model runner port, audit, cost | [m2-model-runner.md](m2-model-runner.md) |
 | M3 | Chat, conversation loop, approvals | [m3-conversation.md](m3-conversation.md) |
-| M4 | The roster: residents, delegation, report aggregation | not written |
+| M4 | [The roster: residents, delegation, report aggregation](m4-the-roster.md) | proposed |
 | M5 | Memory | not written — [blocked](../spikes/README.md#outstanding) |
 | M6 | Scheduler, durable jobs, budget governor | not written |
 | M7 | Dashboard, ops CLI, packaging | not written |
