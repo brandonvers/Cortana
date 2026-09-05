@@ -6,5 +6,17 @@ export {
   isInside,
   needsConfirmation,
 } from './decide.ts';
-export type { ConfirmPolicy, Profile, SandboxRequirement } from './profile.ts';
-export { downgraded, QUARANTINE } from './profile.ts';
+export type {
+  ConfirmPolicy,
+  Invariant,
+  Profile,
+  QuarantineOptions,
+  SandboxRequirement,
+} from './profile.ts';
+export {
+  CONTAINMENT_INVARIANTS,
+  containmentFailures,
+  downgraded,
+  QUARANTINE,
+  quarantineProfile,
+} from './profile.ts';

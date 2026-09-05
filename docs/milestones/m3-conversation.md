@@ -25,24 +25,24 @@ can act.** Five spikes exist for it and none of their findings is optional.
 
 - [ ] You can hold a conversation with it over a local socket, from the machine
       it runs on, and it remembers the conversation within a session
-- [ ] **Every crossing from the model back into the kernel carries a schema**
+- [x] **Every crossing from the model back into the kernel carries a schema**
       ([ADR-0015](../adr/0015-structured-output-at-the-model-boundary.md)), and
       what you read is a field of it rather than prose that was parsed
-- [ ] A tool call the agent wants to make is **decided by the policy engine
+- [x] A tool call the agent wants to make is **decided by the policy engine
       before it runs**, and a decision the policy engine will not make on its own
       is put to you
-- [ ] **Untrusted content is inspected by a disposable agent before it is
+- [x] **Untrusted content is inspected by a disposable agent before it is
       trusted** ([ADR-0007](../adr/0007-quarantine-untrusted-content.md)), and
       the profile that agent runs under is generated rather than written by hand
-- [ ] The quarantine profile carries **every setting spikes 0010 to 0012 found
+- [x] The quarantine profile carries **every setting spikes 0010 to 0012 found
       necessary**, and a generated profile missing one fails a test rather than a
       review
-- [ ] **The path form in a deny rule is verified, not assumed.** Spike 0011
+- [x] **The path form in a deny rule is verified, not assumed.** Spike 0011
       measured `Read(//abs/**)` holding and `Read(/abs/**)` leaking four times
       out of four
 - [ ] A conversation survives the daemon restarting: what was said is in the
       audit, and the socket comes back
-- [ ] An approval you never answer does not wedge the daemon
+- [x] An approval you never answer does not wedge the daemon
 
 ## The packages
 
@@ -84,6 +84,13 @@ including what happens when you say nothing.
 **5. Quarantine.** ADR-0007's disposable agent, running under a generated
 profile, with the escape test from spike 0011 promoted into the repository the
 way spike 0005's kill test was in M1.
+
+**6. Assembly**, which this plan did not list and the definition of done
+requires. Steps 1 to 5 build the parts; a conversation over the socket that
+survives a restart needs the daemon to hold a channel, an agent and an audited
+runner at once, and to put them back after it stops. Named here rather than
+folded into step 5, because "the pieces exist" and "you can talk to it" are
+different claims and only the second one is on the list above.
 
 ## What the spikes already settle
 
@@ -158,6 +165,22 @@ forgets. That is not a defect of the milestone, it is the shape of it — but it
 means the thing you can finally use will not know yesterday, and the milestone
 that fixes that is [blocked on a corpus](../spikes/README.md#outstanding) only
 you can produce.
+
+## Running the two checks that need a provider
+
+Neither can be in CI: it has no provider credential and is not getting one, and
+spike 0009 measured one identical call ranging over 34×. Both are started by
+hand, on the machine that is authenticated.
+
+```bash
+node packages/runner-claude/src/contract.manual.ts   # the port, 13 cases
+node packages/runner-claude/src/escape.manual.ts     # spike 0011's escape test
+```
+
+The escape test **runs its positive control first and refuses to report on the
+locks if the control does not escape**. That is the finding spike 0011 exists
+for: spike 0004 ran both locks together, saw no escape, and could not tell that
+from a model that simply declined.
 
 ## Risks
 
