@@ -148,6 +148,9 @@ importers:
 
   packages/roster:
     dependencies:
+      '@cortana/agent':
+        specifier: workspace:*
+        version: link:../agent
       '@cortana/core':
         specifier: workspace:*
         version: link:../core

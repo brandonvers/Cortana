@@ -15,6 +15,7 @@ const VALID = {
     writable: [],
     confirm: 'writes',
   },
+  roster: { directory: '/etc/cortana/agents', idleTtlMs: 300_000, maxAwake: 4 },
   shutdown: { timeoutMs: 15_000 },
 };
 
@@ -158,5 +159,28 @@ describe('the agent section', () => {
     // There is no sandbox setting here at all, and that is the design:
     // `workingProfile` derives it from the tools, so the two cannot drift.
     expect(agent({ sandbox: 'none' }).success).toBe(false);
+  });
+});
+
+describe('the roster section', () => {
+  const roster = (over: Record<string, unknown>) =>
+    configSchema.safeParse({ ...VALID, roster: { ...VALID.roster, ...over } });
+
+  it('refuses an idle window of nothing', () => {
+    // An agent that sleeps the instant it finishes pays a 5.4–6.2 s cold start
+    // for every turn of one conversation, which is what dormancy exists to
+    // avoid rather than to cause.
+    expect(roster({ idleTtlMs: 0 }).success).toBe(false);
+    expect(roster({ idleTtlMs: 999 }).success).toBe(false);
+    expect(roster({ idleTtlMs: 1_000 }).success).toBe(true);
+  });
+
+  it('insists at least one agent may be awake', () => {
+    expect(roster({ maxAwake: 0 }).success).toBe(false);
+    expect(roster({ maxAwake: 1 }).success).toBe(true);
+  });
+
+  it('refuses a relative agents directory', () => {
+    expect(roster({ directory: 'agents' }).success).toBe(false);
   });
 });

@@ -24,6 +24,7 @@ beforeEach(() => {
       writable: [],
       confirm: 'writes',
     },
+    roster: { directory: '/etc/cortana/agents', idleTtlMs: 300_000, maxAwake: 4 },
     shutdown: { timeoutMs: 5_000 },
   };
 });

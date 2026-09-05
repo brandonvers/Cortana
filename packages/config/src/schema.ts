@@ -100,6 +100,38 @@ export const configSchema = z.strictObject({
     confirm: z.enum(['never', 'writes', 'always']),
   }),
 
+  roster: z.strictObject({
+    /**
+     * Where agent definitions live. Absolute, and an absent directory is an
+     * empty roster rather than an error — a first run has no agents yet.
+     */
+    directory: z.string().min(1).refine(isAbsolute, { error: 'must be an absolute path' }),
+    /**
+     * How long an agent stays awake with nothing to do.
+     *
+     * [ADR-0006](../../../docs/adr/0006-dormancy-is-the-default.md) makes
+     * dormancy the default and [spike 0003](../../../docs/spikes/0003-concurrent-sessions.md)
+     * measured what it costs: **−195 ms** on the realistic profile, and at worst
+     * a few hundred milliseconds added to a multi-second reply. So this can be
+     * short without hurting, and a long one costs 264 MB and a live context per
+     * agent for nothing.
+     *
+     * Zero is not allowed. An agent that sleeps the instant it finishes would
+     * pay a cold start for every turn of one conversation, which is the 5.4–6.2 s
+     * dormancy exists to avoid rather than to cause.
+     */
+    idleTtlMs: z.int().min(1_000).max(86_400_000),
+    /**
+     * How many agents may be awake at once.
+     *
+     * Spike 0003 measured a dozen sessions holding at 264 MB each, flat across
+     * scale, so memory is not what binds this — **tokens are**, and the budget
+     * governor that would answer for them is M6. Until then this is the only
+     * thing standing between a roster and a bill.
+     */
+    maxAwake: z.int().min(1).max(24),
+  }),
+
   shutdown: z.strictObject({
     /**
      * How long draining may take before the process stops waiting.
