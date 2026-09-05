@@ -11,6 +11,6 @@ export default defineConfig({
   // Tables live with the package that owns them; the migration history stays
   // here, single and ordered, which is the property ADR-0010 cares about. A new
   // package with tables adds a line rather than editing a file everyone shares.
-  schema: ['./src/schema.ts', '../audit/src/schema.ts'],
+  schema: ['./src/schema.ts', '../audit/src/schema.ts', '../roster/src/schema.ts'],
   out: './migrations',
 });
