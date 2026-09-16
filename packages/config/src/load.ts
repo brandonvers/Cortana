@@ -26,6 +26,7 @@ import { type Config, configSchema } from './schema.ts';
 const ENV_PREFIX = `${PRODUCT_NAME.toUpperCase()}_`;
 const APP_DIR = PRODUCT_NAME.toLowerCase();
 const FILE_NAME = 'config.toml';
+const AGENTS_DIR = 'agents';
 
 export type SettingSource = 'default' | 'file' | 'environment';
 
@@ -63,6 +64,7 @@ const BINDINGS: readonly Binding[] = [
     },
   },
   { name: 'AGENT_PERSONA', path: ['agent', 'persona'] },
+  { name: 'ROSTER_DIR', path: ['roster', 'directory'] },
   { name: 'AGENT_TIER', path: ['agent', 'tier'] },
   {
     name: 'SHUTDOWN_TIMEOUT_MS',
@@ -119,8 +121,37 @@ function defaults(env: Env): Tree {
       writable: [],
       confirm: 'writes',
     },
+    roster: {
+      directory: defaultRosterDirectory(env),
+      // Long enough to hold a conversation together, short enough that an agent
+      // nobody is talking to is not costing anything by the time you notice.
+      idleTtlMs: 300_000,
+      // CONCEPTS §3.3: "at any moment two or three of them are awake". Four
+      // leaves room for that plus the one you are talking to.
+      maxAwake: 4,
+    },
     shutdown: { timeoutMs: 15_000 },
   };
+}
+
+/**
+ * Where agent definitions live when nothing says otherwise.
+ *
+ * Beside the configuration file rather than beside the database, because a
+ * definition is something a person writes and a database is something a process
+ * owns. `CONFIGURATION_DIRECTORY` is set by systemd when the unit declares
+ * `ConfigurationDirectory=`, which ours does — so the packaged service and a
+ * hand-run process agree with nothing configured, the same arrangement
+ * `dataDir` already has with `STATE_DIRECTORY`.
+ */
+function defaultRosterDirectory(env: Env): string {
+  const fromSystemd = env['CONFIGURATION_DIRECTORY']?.split(':')[0];
+  if (fromSystemd) return join(fromSystemd, AGENTS_DIR);
+
+  const xdg = env['XDG_CONFIG_HOME'];
+  if (xdg) return join(xdg, APP_DIR, AGENTS_DIR);
+
+  return join(home(env), '.config', APP_DIR, AGENTS_DIR);
 }
 
 /** Files to try, in order. The first that exists wins. */

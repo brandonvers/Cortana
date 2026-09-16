@@ -12,6 +12,7 @@
     "src"
   ],
   "dependencies": {
+    "@cortana/agent": "workspace:*",
     "@cortana/core": "workspace:*",
     "@cortana/policy": "workspace:*",
     "@cortana/runner": "workspace:*",

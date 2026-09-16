@@ -1,5 +1,7 @@
 export type { AgentDefinition, Frontmatter } from './definition.ts';
 export { AGENT_NAME, agentDefinition, parseDefinition } from './definition.ts';
+export type { Resident, Residents, ResidentsOptions } from './residents.ts';
+export { createResidents, resetAgentStates } from './residents.ts';
 export type {
   AgentOrigin,
   AgentState,
