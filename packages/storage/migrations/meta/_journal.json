@@ -22,6 +22,13 @@
       "when": 1788642417567,
       "tag": "0002_add_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789572144984,
+      "tag": "0003_add_requests_and_reports",
+      "breakpoints": true
     }
   ]
 }

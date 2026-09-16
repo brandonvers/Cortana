@@ -1,0 +1,19 @@
+{
+  "name": "@cortana/reports",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "What agents report back: stored before it is acknowledged, leased while it is delivered, and completed once.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@cortana/core": "workspace:*",
+    "@cortana/storage": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  }
+}

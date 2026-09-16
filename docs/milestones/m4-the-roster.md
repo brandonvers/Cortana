@@ -90,6 +90,20 @@ become a property the repository checks.
 0005's kill test promoted the way spike 0005's *other* kill test already was in
 M1 — the harness exists and its findings are what this step has to reproduce.
 
+> **What the step found.** Four things in the spike's harness were right for a
+> script and wrong for a daemon, and two of them were bugs a test now fails on:
+> its lease could hand one report to two callers, and its reclaim made a
+> restart wait out every dead lease's TTL. The idempotency table is gone — a
+> report's own state is the record, so there is one row saying a thing once.
+>
+> **And the guarantee is at-least-once delivery, exactly-once completion.** A
+> report handed to a model turn is an external effect, and a crash between the
+> turn and the completion delivers it again after restart; nothing a store does
+> can make that effect un-happen. **Step 4 and step 5 inherit this**: the main
+> agent may see a report twice after a crash, reports carry their ids so a
+> repeat is recognisable, and recognising it is the consumer's half of the
+> bargain.
+
 **4. Aggregation.** ADR-0014's three rules. The most correctness-critical code in
 the milestone and the least visible when it is wrong.
 
