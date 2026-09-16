@@ -49,6 +49,13 @@ Delivery rules, in priority order:
 - Progress is **observable without being interruptive**: reports are durable and
   visible on the dashboard whether or not the main agent has read them.
 - No report is ever lost, including across a crash mid-delivery.
+- **A report may be delivered twice**, and this was not stated until the store
+  was built (M4 step 3, 2026-09-16). Delivering a report is a model turn — an
+  external effect — so a crash after the turn and before the delivery is
+  recorded delivers it again after restart. The store guarantees at-least-once
+  delivery and exactly-once *completion*; it cannot guarantee exactly-once
+  delivery, and nothing on this side of a model call could. Reports carry ids so
+  the main agent's side can recognise a repeat.
 - **Cost:** the main agent's answer arrives later than the first team's finding
   would have. That is the trade being made deliberately — completeness over
   immediacy — and rule 1 is the escape hatch for when immediacy actually matters.
