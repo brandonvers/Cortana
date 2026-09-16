@@ -50,23 +50,51 @@ const report = (requestId: string, over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const opened = () => store.openRequest({ expected: 3, deadlineMs: 60_000 });
+const opened = () =>
+  store.openRequest({ assignees: ['mail', 'research', 'writer'], deadlineMs: 60_000 });
 
 describe('opening a request', () => {
-  it('refuses one that expects nothing', async () => {
+  it('refuses one given to nobody', async () => {
     // A request nobody works on is not a request, and ADR-0014's "hold until
     // the outstanding work is done" would be done before it started.
-    for (const expected of [0, -1, 1.5]) {
-      await expect(store.openRequest({ expected, deadlineMs: 60_000 })).rejects.toSatisfy(
-        (error: unknown) => isAppError(error) && error.code === 'request-expects-nothing',
-      );
-    }
+    await expect(store.openRequest({ assignees: [], deadlineMs: 60_000 })).rejects.toSatisfy(
+      (error: unknown) => isAppError(error) && error.code === 'request-expects-nothing',
+    );
+  });
+
+  it('refuses an assignee with no name', async () => {
+    await expect(
+      store.openRequest({ assignees: ['mail', '  '], deadlineMs: 60_000 }),
+    ).rejects.toSatisfy(
+      (error: unknown) => isAppError(error) && error.code === 'request-unnamed-assignee',
+    );
+  });
+
+  it('refuses the same agent twice rather than quietly counting it once', async () => {
+    // Deduplicating here would hide a delegation that went wrong upstream, and
+    // the symptom would turn up later as a request that never adds up.
+    await expect(
+      store.openRequest({ assignees: ['mail', 'mail'], deadlineMs: 60_000 }),
+    ).rejects.toSatisfy(
+      (error: unknown) => isAppError(error) && error.code === 'request-duplicate-assignee',
+    );
+  });
+
+  it('remembers who it was given to, and is open until closed', async () => {
+    const requestId = await store.openRequest({
+      assignees: ['writer', 'mail'],
+      deadlineMs: 60_000,
+    });
+
+    expect(store.request(requestId)?.assignees).toEqual(['mail', 'writer']);
+    expect(store.request(requestId)?.closedAt).toBeNull();
+    expect(store.openRequests()).toEqual([requestId]);
   });
 
   it('refuses one with no deadline', async () => {
     // ADR-0014's third rule exists so one stalled team cannot withhold what its
     // siblings finished. A request without a deadline has no third rule.
-    await expect(store.openRequest({ expected: 1, deadlineMs: 0 })).rejects.toSatisfy(
+    await expect(store.openRequest({ assignees: ['mail'], deadlineMs: 0 })).rejects.toSatisfy(
       (error: unknown) => isAppError(error) && error.code === 'request-without-deadline',
     );
   });
@@ -107,6 +135,32 @@ describe('submitting a report', () => {
     );
   });
 
+  it('refuses a report from an agent the request was not given to', async () => {
+    // Nothing an agent says about itself decides what it was asked to do. A
+    // report from outside the assignment would reach the main agent as though
+    // it had been.
+    const requestId = await opened();
+
+    await expect(store.submit(report(requestId, { sender: 'stranger' }))).rejects.toSatisfy(
+      (error: unknown) => isAppError(error) && error.code === 'report-from-unassigned-sender',
+    );
+  });
+
+  it('refuses a new report once the request has finished, but not a retry', async () => {
+    // The order matters: a sender that crashed without learning its report
+    // landed, retrying after the request closed, is told "already have it" —
+    // not that it broke a rule it did not break.
+    const requestId = await opened();
+    const sent = report(requestId);
+    await store.submit(sent);
+    await store.close(requestId);
+
+    expect(await store.submit(sent)).toEqual({ accepted: false });
+    await expect(store.submit(report(requestId))).rejects.toSatisfy(
+      (error: unknown) => isAppError(error) && error.code === 'report-for-closed-request',
+    );
+  });
+
   it('refuses a payload larger than anybody would read', async () => {
     // The payload is model output. Without a limit, a runaway turn decides how
     // large the database gets.
@@ -127,6 +181,18 @@ describe('submitting a report', () => {
     await expect(store.submit(report(requestId, { payload: undefined }))).rejects.toSatisfy(
       (error: unknown) => isAppError(error) && error.code === 'report-without-payload',
     );
+  });
+});
+
+describe('closing a request', () => {
+  it('happens once, and takes it out of what is open', async () => {
+    const first = await opened();
+    const second = await opened();
+
+    expect(await store.close(first)).toBe(true);
+    expect(await store.close(first)).toBe(false);
+    expect(store.openRequests()).toEqual([second]);
+    expect(store.request(first)?.closedAt).not.toBeNull();
   });
 });
 

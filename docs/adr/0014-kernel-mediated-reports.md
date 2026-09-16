@@ -56,6 +56,13 @@ Delivery rules, in priority order:
   delivery and exactly-once *completion*; it cannot guarantee exactly-once
   delivery, and nothing on this side of a model call could. Reports carry ids so
   the main agent's side can recognise a repeat.
+- **What is outstanding is a list of names, not a number** (M4 step 4,
+  2026-09-16). A count cannot tell two reports from one agent apart from one each
+  from two, and it cannot name who is missing — which rule 3 requires.
+- **The deadline notice goes out even when nothing is ready.** If every team
+  stalls, rule 3 as worded delivers an empty set, and the person who asked is
+  never answered. The notice names everyone missing, and is recorded so that it
+  is sent once rather than on every pass.
 - **Cost:** the main agent's answer arrives later than the first team's finding
   would have. That is the trade being made deliberately — completeness over
   immediacy — and rule 1 is the escape hatch for when immediacy actually matters.

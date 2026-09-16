@@ -43,7 +43,7 @@ migrateToLatest(storage);
 const writer = createWriter({ storage });
 const store = createReportStore({ storage, writer, instanceId: newInstanceId() });
 
-const requestId = await store.openRequest({ expected: 1_000_000, deadlineMs: 3_600_000 });
+const requestId = await store.openRequest({ assignees: ['probe'], deadlineMs: 3_600_000 });
 writeSync(1, `ready ${requestId}\n`);
 
 for (let seq = 1; ; seq += 1) {

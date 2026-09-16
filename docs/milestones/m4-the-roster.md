@@ -107,6 +107,27 @@ M1 — the harness exists and its findings are what this step has to reproduce.
 **4. Aggregation.** ADR-0014's three rules. The most correctness-critical code in
 the milestone and the least visible when it is wrong.
 
+> **What the step found.** Spike 0005's `readyFor` behaved as specified on the
+> scenarios it was given and gave the wrong answer on four it was not: it
+> **counted** reports, so an agent reporting twice filled the count while another
+> team said nothing; it offered reports whose delivery was **in flight**; it
+> measured what was missing against **undelivered** reports, so a late arrival
+> counted already-delivered ones as missing; and it had **no decision requests**.
+> Each one was put back as a mutation and each one fails a test.
+>
+> The first means step 3's `expected` count was the wrong model, and it was
+> replaced by the list of who a request was given to — which is also the only
+> way rule 3 can name *who* is missing, as the ADR requires.
+>
+> **And one case the ADR's wording did not cover: every team stalls.** "Deliver
+> what is ready" with nothing ready delivers nothing, and the person who asked is
+> never answered. The deadline notice now goes out even when empty, naming
+> everyone, and is recorded so it goes out once.
+>
+> **Left for step 5:** a request whose assignee never reports stays open after
+> its deadline notice, delivering stragglers as they come. When to give up on an
+> assignee — its agent could not wake, or failed — is delegation's question.
+
 **5. Delegation.** The main agent's `delegate` action, through the policy engine,
 into the roster, out through the reports.
 

@@ -13,27 +13,57 @@
  * that can disagree after a crash between their writes.
  */
 
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 export const requests = sqliteTable('requests', {
   /** A version 7 UUID, so requests sort by when they were opened. */
   id: text('id').primaryKey(),
-  /**
-   * How many reports this request is waiting for.
-   *
-   * The number ADR-0014's second rule is about — "held until the request's
-   * outstanding work is done" — and the thing the ADR warned costs something:
-   * "the kernel now needs a per-request model of outstanding work … it has to
-   * know what was dispatched to know when everything is back."
-   */
-  expected: integer('expected').notNull(),
   /**
    * When holding stops. ADR-0014's third rule: one stalled team cannot withhold
    * what its siblings finished. Epoch milliseconds.
    */
   deadlineAt: integer('deadline_at').notNull(),
   createdAt: integer('created_at').notNull(),
+  /**
+   * When the deadline notice went out — ADR-0014's third rule, delivered.
+   *
+   * Recorded because the notice can be empty. If every team stalled there is
+   * nothing to deliver, and the main agent still has to be told, or the person
+   * who asked is never answered at all. An empty delivery completes no report,
+   * so without this column nothing would say it had happened, and it would go
+   * out again on every pass.
+   */
+  timedOutAt: integer('timed_out_at'),
+  /**
+   * When every assignee's reports had been delivered, and nothing more is
+   * waited for. Null while the request is open.
+   */
+  closedAt: integer('closed_at'),
 });
+
+/**
+ * Who a request was given to — one row per agent.
+ *
+ * This replaced a count, and the count was the defect. Spike 0005 stored how
+ * many reports a request expected, and a count cannot tell two reports from one
+ * agent apart from one report each from two: an agent that reported twice
+ * filled the number while another team said nothing, and the request was
+ * delivered as complete with a team missing. It also cannot name who is
+ * missing, and [ADR-0014](../../../docs/adr/0014-kernel-mediated-reports.md)'s
+ * third rule requires exactly that — on timeout the main agent "is told
+ * explicitly what is missing and why". The ADR said the kernel "has to know what
+ * was dispatched to know when everything is back"; a number is not what was
+ * dispatched.
+ */
+export const requestAssignments = sqliteTable(
+  'request_assignments',
+  {
+    requestId: text('request_id').notNull(),
+    /** The agent the work was given to, by roster name. */
+    assignee: text('assignee').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.requestId, table.assignee] })],
+);
 
 export const reports = sqliteTable(
   'reports',
@@ -52,10 +82,15 @@ export const reports = sqliteTable(
     /** Which agent sent it. */
     sender: text('sender').notNull(),
     /**
-     * `blocker` is ADR-0014's first rule: delivered immediately, because a team
-     * that is stuck does not wait for its siblings.
+     * `blocker` and `decision` are ADR-0014's first rule — "a blocker or a
+     * decision request is delivered immediately" — and are kept apart because
+     * they ask the main agent different things: one team is stuck, the other
+     * needs a call only the main agent can make. Spike 0005 had only the first.
+     *
+     * Neither counts as the assignee's report. A team that was blocked and then
+     * unblocked still owes the report it was asked for.
      */
-    kind: text('kind', { enum: ['report', 'blocker'] }).notNull(),
+    kind: text('kind', { enum: ['report', 'blocker', 'decision'] }).notNull(),
     /** The report itself, as JSON. Validated where a model produced it, not here. */
     payload: text('payload').notNull(),
     state: text('state', { enum: ['pending', 'leased', 'delivered'] })
