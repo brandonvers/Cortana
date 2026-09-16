@@ -54,7 +54,8 @@
 import { AppError, type Clock, type InstanceId, systemClock, uuidV7 } from '@cortana/core';
 import type { Storage, Writer } from '@cortana/storage';
 import { and, asc, eq, inArray, isNull, lt, ne, or } from 'drizzle-orm';
-import { type ReportRow, reports, requests } from './schema.ts';
+import { decideDelivery } from './aggregate.ts';
+import { type ReportRow, reports, requestAssignments, requests } from './schema.ts';
 
 /**
  * The most a single report's payload may be.
@@ -91,10 +92,32 @@ export interface StoredReport {
 }
 
 export interface OpenRequest {
-  /** How many reports to wait for. At least one — a request nobody works on is not one. */
-  readonly expected: number;
+  /**
+   * Who the work was given to, by roster name. At least one, and each once.
+   *
+   * Names rather than a count, because a count cannot tell two reports from one
+   * agent apart from one report each from two — see `requestAssignments`.
+   */
+  readonly assignees: readonly string[];
   /** How long to hold for siblings before delivering what is there. */
   readonly deadlineMs: number;
+}
+
+export interface RequestRecord {
+  readonly id: string;
+  readonly assignees: readonly string[];
+  readonly deadlineAt: number;
+  readonly createdAt: number;
+  /** When the deadline notice went out, or null if it has not. */
+  readonly timedOutAt: number | null;
+  readonly closedAt: number | null;
+}
+
+export interface Settled {
+  /** Reports this call marked delivered. */
+  readonly completed: number;
+  /** Whether this call found the request finished and closed it. */
+  readonly closed: boolean;
 }
 
 export interface ReportStore {
@@ -109,6 +132,32 @@ export interface ReportStore {
   submit(report: NewReport): Promise<{ readonly accepted: boolean }>;
   /** Reports for a request that nobody has completed yet, oldest first. */
   outstanding(requestId: string): readonly StoredReport[];
+  /** Every report for a request, whatever its state, oldest first. */
+  reportsFor(requestId: string): readonly StoredReport[];
+  request(requestId: string): RequestRecord | null;
+  /** Requests still waiting on something, oldest first. */
+  openRequests(): readonly string[];
+  /** Marks a request finished. A second call changes nothing and returns false. */
+  close(requestId: string): Promise<boolean>;
+  /**
+   * Records that a delivery reached the main agent, in one transaction: the
+   * reports completed, the deadline notice marked sent if that is what it was,
+   * and the request closed if nothing is left to wait for.
+   *
+   * One unit because each of those facts depends on the others. Completing the
+   * reports and then crashing before marking the notice would send the notice
+   * again; closing on a separate write could close a request a report arrived
+   * for in between.
+   *
+   * The deadline notice is marked only if every report in it was completed by
+   * this run. A lease lost to a restart means the notice was not this run's to
+   * deliver, and whoever holds it now will send it.
+   */
+  settle(
+    requestId: string,
+    reportIds: readonly string[],
+    options: { readonly deadlineNotice: boolean },
+  ): Promise<Settled>;
   get(id: string): StoredReport | null;
   /**
    * Takes a lease on these reports for this instance, and returns the ones it
@@ -153,18 +202,87 @@ function hydrate(row: ReportRow): StoredReport {
   };
 }
 
+type Db = Storage['db'];
+
+function readRequest(db: Db, requestId: string): RequestRecord | null {
+  const row = db.select().from(requests).where(eq(requests.id, requestId)).get();
+  if (row === undefined) return null;
+  const assignees = db
+    .select()
+    .from(requestAssignments)
+    .where(eq(requestAssignments.requestId, requestId))
+    .all()
+    .map((assignment) => assignment.assignee)
+    .sort();
+  return {
+    id: row.id,
+    assignees,
+    deadlineAt: row.deadlineAt,
+    createdAt: row.createdAt,
+    timedOutAt: row.timedOutAt,
+    closedAt: row.closedAt,
+  };
+}
+
+function readReports(db: Db, requestId: string): StoredReport[] {
+  return db
+    .select()
+    .from(reports)
+    .where(eq(reports.requestId, requestId))
+    .orderBy(asc(reports.createdAt), asc(reports.id))
+    .all()
+    .map(hydrate);
+}
+
 export function createReportStore(options: ReportStoreOptions): ReportStore {
   const clock = options.clock ?? systemClock;
   const { storage, writer } = options;
   const owner = options.instanceId as string;
 
+  /**
+   * Marks leased reports delivered, inside whatever unit calls it.
+   *
+   * Only a lease this instance holds. A lease that was reclaimed and taken by
+   * someone else is no longer ours to complete, and completing it anyway would
+   * mark delivered a report its current holder has not delivered yet.
+   */
+  const completeIn = (db: Db, ids: readonly string[], now: number): number =>
+    ids.length === 0
+      ? 0
+      : db
+          .update(reports)
+          .set({ state: 'delivered', deliveredAt: now, leaseOwner: null, leaseUntil: null })
+          .where(
+            and(
+              inArray(reports.id, [...ids]),
+              eq(reports.state, 'leased'),
+              eq(reports.leaseOwner, owner),
+            ),
+          )
+          .run().changes;
+
   return {
     async openRequest(request) {
-      if (!Number.isInteger(request.expected) || request.expected < 1) {
+      if (request.assignees.length === 0) {
         throw contract(
-          `a request expects at least one report, not ${request.expected}`,
+          'a request has to be given to at least one agent',
           'request-expects-nothing',
-          { expected: request.expected },
+          { assignees: 0 },
+        );
+      }
+      if (request.assignees.some((name) => typeof name !== 'string' || name.trim() === '')) {
+        throw contract('a request was given to an agent with no name', 'request-unnamed-assignee', {
+          assignees: request.assignees.length,
+        });
+      }
+      if (new Set(request.assignees).size !== request.assignees.length) {
+        // Not deduplicated quietly. Giving the same agent the same request twice
+        // is a delegation that went wrong upstream, and the place to hear about
+        // it is here rather than in a report count that never adds up.
+        throw contract(
+          'a request was given to the same agent more than once',
+          'request-duplicate-assignee',
+          { assignees: request.assignees.length },
         );
       }
       if (!Number.isFinite(request.deadlineMs) || request.deadlineMs <= 0) {
@@ -178,14 +296,15 @@ export function createReportStore(options: ReportStoreOptions): ReportStore {
       // A plain insert. The spike's INSERT OR REPLACE let reopening a request
       // reset its deadline without a word, and ids are minted here, so a
       // collision is a defect worth hearing about rather than a case to absorb.
+      // One unit, so a request never exists without the list of who it went to —
+      // a request with no assignments would read as finished the moment it was
+      // opened.
       await writer.write('open a request', ({ db }) => {
         db.insert(requests)
-          .values({
-            id,
-            expected: request.expected,
-            deadlineAt: now + request.deadlineMs,
-            createdAt: now,
-          })
+          .values({ id, deadlineAt: now + request.deadlineMs, createdAt: now })
+          .run();
+        db.insert(requestAssignments)
+          .values(request.assignees.map((assignee) => ({ requestId: id, assignee })))
           .run();
       });
       return id;
@@ -227,6 +346,49 @@ export function createReportStore(options: ReportStoreOptions): ReportStore {
           );
         }
 
+        // A retry is still a retry after the request closed. Checked before
+        // either refusal below, so a sender that crashed without learning its
+        // report landed is told what happened rather than that it did wrong.
+        //
+        // This makes the conflict clause on the insert below look redundant, and
+        // in this process it is: a duplicate returns here first. Measured, as
+        // with the lease — either guard alone keeps a retry from rewriting a
+        // report, and the test fails only when both are gone. The clause stays
+        // for a writer this check cannot see, and removing either on the grounds
+        // that the other exists is how the protection quietly becomes one.
+        const existing = db.select().from(reports).where(eq(reports.id, report.id)).get();
+        if (existing !== undefined) return { accepted: false };
+
+        if (request.closedAt !== null) {
+          throw contract(
+            'a report arrived for a request that has already finished',
+            'report-for-closed-request',
+            { id: report.id, requestId: report.requestId },
+          );
+        }
+
+        // An agent reporting on work it was not given. Refused rather than
+        // stored: nothing an agent says about itself decides what it was asked
+        // to do — CONCEPTS §7.3 — and a report from outside the assignment would
+        // otherwise reach the main agent as though it had been.
+        const assigned = db
+          .select()
+          .from(requestAssignments)
+          .where(
+            and(
+              eq(requestAssignments.requestId, report.requestId),
+              eq(requestAssignments.assignee, report.sender),
+            ),
+          )
+          .get();
+        if (assigned === undefined) {
+          throw contract(
+            `"${report.sender}" reported on a request it was not given`,
+            'report-from-unassigned-sender',
+            { id: report.id, requestId: report.requestId, sender: report.sender },
+          );
+        }
+
         const result = db
           .insert(reports)
           .values({
@@ -241,6 +403,65 @@ export function createReportStore(options: ReportStoreOptions): ReportStore {
           .onConflictDoNothing({ target: reports.id })
           .run();
         return { accepted: result.changes === 1 };
+      });
+    },
+
+    reportsFor: (requestId) => readReports(storage.db, requestId),
+
+    request: (requestId) => readRequest(storage.db, requestId),
+
+    openRequests() {
+      return storage.db
+        .select({ id: requests.id })
+        .from(requests)
+        .where(isNull(requests.closedAt))
+        .orderBy(asc(requests.createdAt), asc(requests.id))
+        .all()
+        .map((row) => row.id);
+    },
+
+    async close(requestId) {
+      return writer.write(
+        'close a request',
+        ({ db }) =>
+          db
+            .update(requests)
+            .set({ closedAt: clock.now() })
+            .where(and(eq(requests.id, requestId), isNull(requests.closedAt)))
+            .run().changes === 1,
+      );
+    },
+
+    async settle(requestId, reportIds, settleOptions) {
+      return writer.write('settle a delivery', ({ db }) => {
+        const now = clock.now();
+        const completed = completeIn(db, reportIds, now);
+
+        if (settleOptions.deadlineNotice && completed === reportIds.length) {
+          db.update(requests)
+            .set({ timedOutAt: now })
+            .where(and(eq(requests.id, requestId), isNull(requests.timedOutAt)))
+            .run();
+        }
+
+        // Read back inside the unit and asked of the same rule that decides
+        // deliveries, so "finished" cannot mean one thing here and another
+        // there — and nothing can arrive between the read and the close.
+        const record = readRequest(db, requestId);
+        if (record === null) return { completed, closed: false };
+        const decision = decideDelivery({
+          request: record,
+          reports: readReports(db, requestId),
+          now,
+        });
+        const closed =
+          decision.action === 'finished' &&
+          db
+            .update(requests)
+            .set({ closedAt: now })
+            .where(and(eq(requests.id, requestId), isNull(requests.closedAt)))
+            .run().changes === 1;
+        return { completed, closed };
       });
     },
 
@@ -308,30 +529,9 @@ export function createReportStore(options: ReportStoreOptions): ReportStore {
 
     async complete(ids) {
       if (ids.length === 0) return 0;
-      return writer.write(
-        'complete reports',
-        ({ db }) =>
-          db
-            .update(reports)
-            .set({
-              state: 'delivered',
-              deliveredAt: clock.now(),
-              leaseOwner: null,
-              leaseUntil: null,
-            })
-            // Only a lease this instance holds. A lease that was reclaimed and
-            // taken by someone else is no longer ours to complete, and completing
-            // it anyway would mark delivered a report its current holder has not
-            // delivered yet.
-            .where(
-              and(
-                inArray(reports.id, [...ids]),
-                eq(reports.state, 'leased'),
-                eq(reports.leaseOwner, owner),
-              ),
-            )
-            .run().changes,
-      );
+      // The same statement `settle` uses, so there is one definition of what
+      // completing a report means.
+      return writer.write('complete reports', ({ db }) => completeIn(db, ids, clock.now()));
     },
 
     async release(ids) {

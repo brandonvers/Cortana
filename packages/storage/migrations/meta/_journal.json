@@ -29,6 +29,20 @@
       "when": 1789572144984,
       "tag": "0003_add_requests_and_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789573884932,
+      "tag": "0004_drop_request_expected",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789574014836,
+      "tag": "0005_add_request_assignments",
+      "breakpoints": true
     }
   ]
 }
