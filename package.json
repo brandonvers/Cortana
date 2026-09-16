@@ -24,7 +24,8 @@
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "check:licenses": "node scripts/check-licenses.mjs",
     "check:private": "node scripts/check-private.mjs",
-    "verify": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run check:boundaries && pnpm run check:spikes && pnpm run check:licenses && pnpm run check:private",
+    "check:supply-chain": "node scripts/check-supply-chain.mjs",
+    "verify": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run check:boundaries && pnpm run check:spikes && pnpm run check:licenses && pnpm run check:supply-chain && pnpm run check:private",
     "check:spikes": "node scripts/check-spikes.mjs"
   },
   "devDependencies": {

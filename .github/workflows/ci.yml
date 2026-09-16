@@ -65,6 +65,11 @@ jobs:
       - name: Licence check
         run: pnpm run check:licenses
 
+      # pnpm 11 answers a request for a too-new version by writing an exception
+      # to its own cooling-off policy, silently. This is where that fails.
+      - name: Supply-chain check
+        run: pnpm run check:supply-chain
+
   privacy:
     name: privacy guard
     runs-on: ubuntu-latest
