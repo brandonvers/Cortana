@@ -275,6 +275,17 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
       options: {
         model: models[open.spec.tier],
         systemPrompt: open.spec.systemPrompt,
+        // Stated rather than inherited. Since SDK 0.3.286 an omitted mode is
+        // the provider's to pick, and where `auto` is its default — telemetry
+        // off, a third-party provider — a classifier approves calls and
+        // `canUseTool` hears only the ones it cannot decide. Every measurement
+        // behind ADR-0021 was taken in this mode.
+        permissionMode: 'default',
+        // The kernel composes every prompt, and some of what it composes was
+        // written by somebody else. Without this the provider reads `@/path` as
+        // a file to attach before the model is asked anything, and no call
+        // reaches the gate — measured in `mention.manual.ts`.
+        verbatimPrompts: true,
         // The permission rules go through the flag layer — the highest-priority
         // *user-controlled* tier — rather than through `managedSettings`, which
         // reads like the stronger choice and is not. Spike 0010 measured the

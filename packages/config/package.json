@@ -13,7 +13,7 @@
   ],
   "dependencies": {
     "@cortana/core": "workspace:*",
-    "smol-toml": "^1.8.0",
-    "zod": "^4.5.4"
+    "smol-toml": "^1.9.1",
+    "zod": "^4.6.5"
   }
 }
