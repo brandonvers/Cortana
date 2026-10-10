@@ -1,0 +1,20 @@
+{
+  "name": "@cortana/telegram",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The Telegram bot you talk to it through from a phone: the allowlist, turns, and approvals as buttons.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@cortana/channel": "workspace:*",
+    "@cortana/config": "workspace:*",
+    "@cortana/core": "workspace:*",
+    "grammy": "^1.46.0"
+  }
+}
