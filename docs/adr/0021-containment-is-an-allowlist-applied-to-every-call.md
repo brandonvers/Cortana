@@ -106,6 +106,37 @@ it is answered by the hook rather than by `canUseTool`.
 **Rely on the OS sandbox.** [Spike 0010](../spikes/0010-non-bash-containment.md)
 already settled this: it does not constrain in-process tools.
 
+## Addendum, 2026-10-10: two ways round the gate that are not calls
+
+Found while moving the adapter from Agent SDK 0.3.272 to 0.3.295. Neither
+changes the decision; both are places where "every call" turned out not to be
+every way in.
+
+**A file named in the prompt is read without a call.** The provider expands an
+`@/path` in a user message into an attached file **before the model is asked
+anything**, and neither the hook nor `canUseTool` hears of it. Measured with
+both surfaces recording: a session granted `Read`, sent `@/path` to a file
+outside its `readable`, returned the file's contents with **zero** calls
+reaching the gate — the model described it as a `Read` it had made. A session
+with no tools, and one with `Read` denied by bare name, did not leak, so
+`QUARANTINE` was never exposed. Every profile that grants `Read` was: its
+`readable` scope is enforced by the gate, and the gate was not asked.
+
+Every session is now opened with `verbatimPrompts: true`, under which the
+provider delivers the text as written — no file mentions, no slash-command
+dispatch. The kernel composes every prompt and some of what it composes was
+written by somebody else, which is the case the option exists for.
+[`mention.manual.ts`](../../packages/runner-claude/src/mention.manual.ts) is the
+measurement, with a positive control; `orchestration.test.ts` checks the option
+reaches the provider.
+
+**An omitted permission mode stopped meaning `default`.** SDK 0.3.286 left it
+to the provider, which starts a session in `auto` where that is its default —
+telemetry off, or a third-party provider. In `auto` a classifier approves calls
+and `canUseTool` hears only the ones it cannot decide, so the table's third row
+would go quiet without anything failing. The adapter now states `default`, the
+mode every measurement above was taken in.
+
 ## Revisit when
 
 The provider gains a way to enumerate a session's actual tool set at runtime — an

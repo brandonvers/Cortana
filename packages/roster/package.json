@@ -17,8 +17,8 @@
     "@cortana/policy": "workspace:*",
     "@cortana/runner": "workspace:*",
     "@cortana/storage": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "smol-toml": "^1.8.0",
-    "zod": "^4.5.4"
+    "drizzle-orm": "^0.45.4",
+    "smol-toml": "^1.9.1",
+    "zod": "^4.6.5"
   }
 }
