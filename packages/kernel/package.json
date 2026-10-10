@@ -21,7 +21,7 @@
     "@cortana/policy": "workspace:*",
     "@cortana/runner": "workspace:*",
     "@cortana/storage": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "pino": "^10.3.1"
+    "drizzle-orm": "^0.45.4",
+    "pino": "^10.4.0"
   }
 }
