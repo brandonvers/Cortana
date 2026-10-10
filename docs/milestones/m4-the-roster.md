@@ -131,6 +131,11 @@ the milestone and the least visible when it is wrong.
 **5. Delegation.** The main agent's `delegate` action, through the policy engine,
 into the roster, out through the reports.
 
+> **Paused here on 2026-10-10**, for [first use](first-use.md): two months in,
+> the system had not been used once, and the questions this step has to answer
+> are better answered by a week of real requests than by another plan. It
+> resumes when first use is done, and starts by reading what that week found.
+
 **6. Ephemeral workers.** `Task` behind the allowlist, for a resident whose
 profile grants it.
 
