@@ -121,6 +121,13 @@ it was missing. Everything after it moved down one.
 characteristic failure of a project like this is a broad, shallow, half-working
 surface. A working M1 beats six half-built milestones.
 
+**One exception has been made, and it is written down as one.** On 2026-10-10
+M4 was paused after its fourth step for [first use](milestones/first-use.md) —
+a chat channel and a stored credential, so the system could be used for real
+work before delegation was designed. It builds nothing that belongs to a later
+milestone, and M4 resumes when it is done. A second exception would need the
+same: a plan saying why, and what it does not start.
+
 ## 3. Tags
 
 Every release is an **annotated, signed** tag: `v0.1.0-alpha.1`.
