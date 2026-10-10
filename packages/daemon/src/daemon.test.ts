@@ -44,6 +44,9 @@ function start(env: Record<string, string> = {}): Started {
       PATH: process.env['PATH'] ?? '',
       HOME: join(root, 'home'),
       XDG_CONFIG_HOME: join(root, 'no-config'),
+      // Not the machine's /etc/cortana. On the deployment target that file
+      // exists and belongs to the service, and every test here read it.
+      CONFIGURATION_DIRECTORY: join(root, 'no-system-config'),
       CORTANA_DATA_DIR: join(root, 'state'),
       ...env,
     },
@@ -197,6 +200,7 @@ describe('a signal that arrives before the daemon can hear it', () => {
       env: {
         HOME: join(root, 'home'),
         XDG_CONFIG_HOME: join(root, 'no-config'),
+        CONFIGURATION_DIRECTORY: join(root, 'no-system-config'),
         CORTANA_DATA_DIR: join(root, 'state'),
       },
       early: { arrived: ['SIGTERM'], release: () => undefined },
@@ -223,6 +227,7 @@ describe('a signal that arrives before the daemon can hear it', () => {
       env: {
         HOME: join(root, 'home'),
         XDG_CONFIG_HOME: join(root, 'no-config'),
+        CONFIGURATION_DIRECTORY: join(root, 'no-system-config'),
         CORTANA_DATA_DIR: join(root, 'state'),
       },
       early: { arrived: ['SIGHUP'], release: () => undefined },

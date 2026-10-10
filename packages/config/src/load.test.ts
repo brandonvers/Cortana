@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isAppError } from '@cortana/core';
@@ -15,11 +15,19 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** An environment with nothing in it but a home directory that has no config. */
+/**
+ * An environment with nothing in it but a home directory that has no config —
+ * and a machine-wide configuration directory of its own, so that what the
+ * machine running the suite has installed in `/etc/cortana` cannot reach it.
+ */
 function bareEnv(): Record<string, string> {
   const home = join(root, 'home');
   mkdirSync(home, { recursive: true });
-  return { HOME: home, XDG_CONFIG_HOME: join(root, 'xdg-config') };
+  return {
+    HOME: home,
+    XDG_CONFIG_HOME: join(root, 'xdg-config'),
+    CONFIGURATION_DIRECTORY: join(root, 'system-config'),
+  };
 }
 
 function writeConfig(body: string): string {
@@ -30,16 +38,8 @@ function writeConfig(body: string): string {
   return path;
 }
 
-/**
- * A machine with a system-wide configuration installed would find it in the
- * search path and change what "no file" means, so the cases that depend on
- * finding nothing say so rather than failing mysteriously somewhere else.
- */
-const systemConfig = '/etc/cortana/config.toml';
-const noSystemConfig = !existsSync(systemConfig);
-
 describe('defaults', () => {
-  it.skipIf(!noSystemConfig)('starts with no configuration at all', () => {
+  it('starts with no configuration at all', () => {
     const { config, file } = loadConfig(bareEnv());
 
     expect(file).toBeNull();
@@ -48,7 +48,7 @@ describe('defaults', () => {
     expect(config.dataDir).toMatch(/\.local\/state\/cortana$/);
   });
 
-  it.skipIf(!noSystemConfig)('prefers the directory systemd created', () => {
+  it('prefers the directory systemd created', () => {
     // StateDirectory= in the unit file sets this, and systemd has already made
     // the directory with the right owner. Preferring it means the packaged
     // service and a hand-run process agree with no configuration at all.
@@ -57,13 +57,13 @@ describe('defaults', () => {
     expect(loadConfig(env).config.dataDir).toBe('/var/lib/cortana');
   });
 
-  it.skipIf(!noSystemConfig)('takes the first entry when systemd gives several', () => {
+  it('takes the first entry when systemd gives several', () => {
     const env = { ...bareEnv(), STATE_DIRECTORY: '/var/lib/cortana:/var/lib/other' };
 
     expect(loadConfig(env).config.dataDir).toBe('/var/lib/cortana');
   });
 
-  it.skipIf(!noSystemConfig)('falls back to XDG_STATE_HOME before the home directory', () => {
+  it('falls back to XDG_STATE_HOME before the home directory', () => {
     const env = { ...bareEnv(), XDG_STATE_HOME: '/somewhere/state' };
 
     expect(loadConfig(env).config.dataDir).toBe('/somewhere/state/cortana');
@@ -106,6 +106,39 @@ describe('precedence', () => {
 });
 
 describe('finding the file', () => {
+  it('reads the machine-wide file from the directory systemd made for the unit', () => {
+    const env = bareEnv();
+    const system = env['CONFIGURATION_DIRECTORY'] as string;
+    mkdirSync(system, { recursive: true });
+    writeFileSync(join(system, 'config.toml'), '[log]\nlevel = "warn"\n');
+
+    const { config, file } = loadConfig(env);
+
+    expect(file).toBe(join(system, 'config.toml'));
+    expect(config.log.level).toBe('warn');
+  });
+
+  it('prefers the user’s own file to the machine-wide one', () => {
+    const env = bareEnv();
+    const system = env['CONFIGURATION_DIRECTORY'] as string;
+    mkdirSync(system, { recursive: true });
+    writeFileSync(join(system, 'config.toml'), '[log]\nlevel = "warn"\n');
+    writeConfig('[log]\nlevel = "debug"\n');
+
+    expect(loadConfig(env).config.log.level).toBe('debug');
+  });
+
+  it('says which file it could not read, rather than skipping it', () => {
+    // The deployment target's own case: a machine-wide file that exists and
+    // belongs to the service. Skipping it would run a different configuration
+    // than the one installed, without a word.
+    const env = bareEnv();
+    const system = env['CONFIGURATION_DIRECTORY'] as string;
+    mkdirSync(join(system, 'config.toml'), { recursive: true });
+
+    expect(() => loadConfig(env)).toThrowError(/cannot read the configuration file at/);
+  });
+
   it('reads the explicit path when one is given', () => {
     const path = join(root, 'elsewhere.toml');
     writeFileSync(path, 'dataDir = "/tmp/cortana-explicit"\n');

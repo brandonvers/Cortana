@@ -159,8 +159,24 @@ function candidatePaths(env: Env): string[] {
   const xdg = env['XDG_CONFIG_HOME'];
   return [
     xdg ? join(xdg, APP_DIR, FILE_NAME) : join(home(env), '.config', APP_DIR, FILE_NAME),
-    join('/etc', APP_DIR, FILE_NAME),
+    join(systemConfigDirectory(env), FILE_NAME),
   ];
+}
+
+/**
+ * The machine-wide configuration directory: the one systemd made for the unit
+ * when it says so, `/etc/cortana` otherwise.
+ *
+ * The same two answers in every real deployment — the unit declares
+ * `ConfigurationDirectory=cortana`, which is `/etc/cortana` — and taken from the
+ * environment for the same reason everything else here is: so that a process
+ * can be told where to look. It was a constant, and the suite read the real
+ * `/etc/cortana/config.toml` of whatever machine it ran on. On the deployment
+ * target that file exists and belongs to the service, and fourteen tests failed
+ * there, and only there, reading a file they were never about.
+ */
+function systemConfigDirectory(env: Env): string {
+  return env['CONFIGURATION_DIRECTORY']?.split(':')[0] || join('/etc', APP_DIR);
 }
 
 function readIfPresent(path: string): string | null {
