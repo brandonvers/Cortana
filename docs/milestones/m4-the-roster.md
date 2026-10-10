@@ -1,6 +1,6 @@
 # M4 — the roster
 
-**Status:** Proposed
+**Status:** In progress — paused after step 4 on 2026-10-10, for [first use](first-use.md)
 **Date:** 2026-09-05
 **Version target:** `0.4.0`
 
@@ -23,6 +23,12 @@ and idempotency against a real store. **M4 promotes both out of the spikes
 directory rather than discovering them.**
 
 ## Definition of done
+
+> **Where it stands.** Steps 1 to 4 exist as packages — `@cortana/roster` and
+> `@cortana/reports`, with their tests — and **nothing in the daemon uses them
+> yet**: wiring them in is step 7. So no box below is ticked, including the ones
+> whose package already does what the box says, because each box describes the
+> running system, not a library.
 
 - [ ] A roster you author as **files**, loaded and validated at boot, with a bad
       one naming the file and the field rather than failing at first use

@@ -1,6 +1,6 @@
 # First use — reachable from a phone
 
-**Status:** Proposed
+**Status:** In progress — steps 1 to 3 done; the server also follows `main` on its own
 **Date:** 2026-10-10
 **Version target:** none of its own — it ships inside `0.4.0`
 
@@ -148,6 +148,20 @@ place `ProtectSystem=strict` leaves writable. The install notes in
 **5. A week of use.** The owner's persona and anything domain-specific live in
 the owner's own configuration, not in this repository — the core knows no
 domain. What the week finds is recorded, and is what step 5 of M4 starts from.
+
+## Added on the way
+
+**The server follows `main`** (#75), asked for once the bot was answering: a
+timer fetches every five minutes, and a new commit is installed, tested on the
+machine, deployed, and confirmed — or rolled back. It is in this plan rather
+than M7's packaging because first use is where it was needed: a fix that lands
+and then waits for someone to log in to the server is a fix the owner does not
+have.
+
+**Its first run found a bug the developer machine and CI could not** (#74): the
+suite read the machine's own `/etc/cortana/config.toml`, which on the server
+exists and belongs to the service, and fourteen tests failed there only. The
+deploy refused it — which is the reason it runs the suite on the target at all.
 
 ## What it does not build
 
