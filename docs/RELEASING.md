@@ -147,9 +147,17 @@ which reads Conventional Commits on `main`.
 1. Work merges to `main` as usual.
 2. release-please opens or updates a **release pull request** with the version
    bump and the generated `CHANGELOG.md` entry.
-3. The maintainer reviews it. This is the checkpoint: a wrong commit type produces
+3. `release.yml` starts CI on it. GitHub starts no workflow for anything its own
+   token did, so the bot's pull request would otherwise never have a check, and
+   the ruleset on `main` would never let it merge. Its commit is signed off by
+   the bot (`signoff` in the configuration), and the DCO check runs on it like
+   any other.
+4. The maintainer reviews it. This is the checkpoint: a wrong commit type produces
    a wrong version bump, and this is where it gets caught.
-4. Merging that pull request creates the tag and the GitHub Release.
+5. **The maintainer merges it, and nobody else does.** Merging creates the tag and
+   the GitHub Release, and a tag is permanent (§3), so cutting a version is a
+   person's decision rather than something an agent does because the checks
+   are green.
 
 ### Forcing a specific version
 
@@ -179,10 +187,13 @@ release.** release-please opens one as soon as any releasable commit lands, and
 before M1 that means it proposes a version built from documentation and tooling
 commits. Merging it would create a permanent tag — §3: never moved, never
 deleted — for a repository whose own README says there is no working software.
-The first tag is `0.1.0-alpha.1`, when M1 reaches its
-[definition of done](milestones/m1-kernel-skeleton.md), and it is forced with a
-`Release-As:` footer as described above. Until then the release pull request is
-a running preview: leave it open, and let it keep updating itself.
+The plan was for the first tag to be `0.1.0-alpha.1`, when M1 reached its
+[definition of done](milestones/m1-kernel-skeleton.md). It was not cut then: M1,
+M2 and M3 finished without a tag, and the release pull request stayed open from
+2026-08-10 — partly because it could not merge at all, having no checks (step 3
+above is the fix). **On 2026-10-10 the maintainer chose `0.1.0` as the first
+tag**, covering M1 to M3 and first use, with the system in daily use on their
+own server. Versions go up from there, one release pull request at a time.
 
 **`prerelease` is `true` in the configuration.** Every release until `1.0.0` is
 marked as a pre-release on GitHub, so nobody installs a `0.x` build believing the

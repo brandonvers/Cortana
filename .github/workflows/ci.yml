@@ -9,6 +9,11 @@ on:
   # the old title. The only escape was to push an unrelated commit.
   pull_request:
     types: [opened, synchronize, reopened, edited]
+  # Started by release.yml for release-please's pull request. GitHub starts no
+  # workflow for anything its own token did — the bot's pushes included — with
+  # this one exception, so without it the release pull request never had a
+  # single check and could not satisfy the ruleset on main.
+  workflow_dispatch:
 
 # A red main is an emergency (CONTRIBUTING.md). Cancel superseded runs on
 # branches, but never cancel a run on main.
@@ -113,7 +118,9 @@ jobs:
 
   dco:
     name: DCO sign-off
-    if: github.event_name == 'pull_request'
+    # Not skipped on a dispatched run. A skipped required check counts as
+    # passing, and a skip here would have been a way past the sign-off rule.
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -123,7 +130,13 @@ jobs:
       - name: Every commit must be signed off
         run: |
           missing=0
-          range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          else
+            # A dispatched run has no pull request to read a range from: the
+            # commits it is vouching for are the ones main does not have yet.
+            range="origin/main..HEAD"
+          fi
           for sha in $(git rev-list --no-merges "$range"); do
             author="$(git show -s --format='%an <%ae>' "$sha")"
             if ! git show -s --format='%B' "$sha" | grep -qiE "^Signed-off-by: .+ <.+@.+>$"; then

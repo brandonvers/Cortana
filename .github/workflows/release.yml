@@ -3,6 +3,8 @@ name: Release
 on:
   push:
     branches: [main]
+  # To run release-please again by hand, e.g. after closing its pull request.
+  workflow_dispatch:
 
 # Only ever one release run at a time, and never cancelled part-way — a
 # half-applied release is worse than a delayed one.
@@ -13,6 +15,8 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
+  # To start CI on the release pull request; see the last step.
+  actions: write
 
 jobs:
   release-please:
@@ -27,3 +31,21 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # GitHub starts no workflow for what its own token did, so the release pull
+      # request this job just opened or updated has no checks, and the ruleset on
+      # main will not let it merge without them. A dispatch is the one event that
+      # token may start. It runs on the release branch, so its results land on
+      # that pull request's head commit, which is where the ruleset looks.
+      - name: Start CI on the release pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --label 'autorelease: pending' --json headRefName --jq '.[0].headRefName // empty')"
+          if [ -z "$branch" ]; then
+            echo "no open release pull request"
+            exit 0
+          fi
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+          echo "started CI on $branch"
