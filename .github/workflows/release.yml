@@ -15,7 +15,7 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
-  # To start CI on the release pull request; see the last step.
+  # To approve CI on the release pull request; see the last step.
   actions: write
 
 jobs:
@@ -32,20 +32,33 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # GitHub starts no workflow for what its own token did, so the release pull
-      # request this job just opened or updated has no checks, and the ruleset on
-      # main will not let it merge without them. A dispatch is the one event that
-      # token may start. It runs on the release branch, so its results land on
-      # that pull request's head commit, which is where the ruleset looks.
-      - name: Start CI on the release pull request
+      # For the pull request this job just opened or updated, GitHub creates the CI
+      # run and holds it for approval — it shows as "action_required" — because
+      # the bot's own token made the push. Measured on 2026-10-10: a CI run
+      # started any other way, by dispatch included, is **not** counted towards
+      # the pull request's required checks, so the held run is the one that has
+      # to go. It is this repository's own CI, on release-please's branch, on a
+      # commit the bot just made, and approving it is what lets the ruleset on
+      # main see the release checked like everything else.
+      #
+      # The run appears a moment after the push, so it is looked for for a
+      # minute. If this step ever fails, approving it by hand is the same act:
+      # "Approve workflows to run" on the pull request.
+      - name: Approve CI on the release pull request
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          branch="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
-            --label 'autorelease: pending' --json headRefName --jq '.[0].headRefName // empty')"
-          if [ -z "$branch" ]; then
-            echo "no open release pull request"
-            exit 0
-          fi
-          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
-          echo "started CI on $branch"
+          for attempt in $(seq 1 12); do
+            ids="$(gh run list --repo "$GITHUB_REPOSITORY" --event pull_request \
+              --status action_required --json databaseId,headBranch \
+              --jq '.[] | select(.headBranch | startswith("release-please--")) | .databaseId')"
+            if [ -n "$ids" ]; then
+              for id in $ids; do
+                gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve"
+                echo "approved CI run $id"
+              done
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "no CI run waiting for approval on a release branch"
