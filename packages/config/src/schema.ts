@@ -132,6 +132,26 @@ export const configSchema = z.strictObject({
     maxAwake: z.int().min(1).max(24),
   }),
 
+  /**
+   * The bot you reach it through from a phone. **Absent means off**, and off
+   * means no connection is opened and no credential is asked for.
+   *
+   * Only who may talk to it is configured here. The bot's token is a
+   * credential, read from wherever this machine keeps credentials (ADR-0018),
+   * and a configuration file is exactly where ADR-0018 says one must not be.
+   */
+  telegram: z
+    .strictObject({
+      /**
+       * Numeric Telegram user ids — which Telegram asserts — rather than
+       * usernames, which their owners change. At least one: an empty list is a
+       * bot that drops everything, and is far likelier to be a missing line
+       * than a decision.
+       */
+      allowedUserIds: z.array(z.int().positive()).min(1),
+    })
+    .optional(),
+
   shutdown: z.strictObject({
     /**
      * How long draining may take before the process stops waiting.

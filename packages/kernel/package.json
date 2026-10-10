@@ -21,6 +21,7 @@
     "@cortana/policy": "workspace:*",
     "@cortana/runner": "workspace:*",
     "@cortana/storage": "workspace:*",
+    "@cortana/telegram": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "pino": "^10.4.0"
   }

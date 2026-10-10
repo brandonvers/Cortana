@@ -4,11 +4,12 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
+import { AppError } from '@cortana/core';
 import { recordingLogger } from '@cortana/core/testing';
 import { instances, openStorage } from '@cortana/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EXIT } from './exit.ts';
-import { announceSecretProtection, runDaemon } from './main.ts';
+import { announceSecretProtection, reportStartupFailure, runDaemon } from './main.ts';
 
 const BIN = join(import.meta.dirname, 'bin.ts');
 
@@ -274,6 +275,55 @@ describe('when the operator has made a mistake', () => {
 
     expect(await daemon.exit()).toBe(EXIT.START_FAILED);
     expect(daemon.output()).toContain(occupied);
+  });
+});
+
+describe('a component that failed to start', () => {
+  const written = () => {
+    let text = '';
+    const destination = new Writable({
+      write(chunk, _encoding, done) {
+        text += String(chunk);
+        done();
+      },
+    });
+    return { destination, text: () => text };
+  };
+  const failedBecause = (cause: unknown) =>
+    new AppError('the component "telegram" failed to start', {
+      category: 'internal',
+      code: 'component-start-failed',
+      detail: { component: 'telegram' },
+      cause,
+    });
+
+  it('exits as a configuration error when configuration is why, so it is not restarted', () => {
+    // The unit restarts on failure except for this code. A missing credential
+    // reported as a start failure was restarted every five seconds, forever,
+    // for something only the operator can fix.
+    const out = written();
+    const code = reportStartupFailure(
+      failedBecause(
+        new AppError('the credential "telegram-bot-token" cannot be read: it is missing', {
+          category: 'config',
+          code: 'credential-missing',
+        }),
+      ),
+      out.destination,
+    );
+
+    expect(code).toBe(EXIT.CONFIGURATION);
+    expect(out.text()).toContain('telegram-bot-token');
+  });
+
+  it('stays a start failure when the cause is anything else, which may be transient', () => {
+    const out = written();
+    const code = reportStartupFailure(
+      failedBecause(new AppError('disk full', { category: 'storage', code: 'disk-full' })),
+      out.destination,
+    );
+
+    expect(code).toBe(EXIT.START_FAILED);
   });
 });
 

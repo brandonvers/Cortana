@@ -68,6 +68,39 @@ describe('configSchema', () => {
   });
 });
 
+describe('the telegram table', () => {
+  it('is optional, because absent means the bot is off', () => {
+    expect(configSchema.parse(VALID).telegram).toBeUndefined();
+  });
+
+  it('takes the numeric ids of the people allowed to talk to it', () => {
+    const parsed = configSchema.parse({ ...VALID, telegram: { allowedUserIds: [123_456_789] } });
+    expect(parsed.telegram?.allowedUserIds).toEqual([123_456_789]);
+  });
+
+  it('refuses an empty allowlist rather than starting a bot that hears nobody', () => {
+    expect(configSchema.safeParse({ ...VALID, telegram: { allowedUserIds: [] } }).success).toBe(
+      false,
+    );
+  });
+
+  it('refuses a username where an id belongs', () => {
+    const result = configSchema.safeParse({ ...VALID, telegram: { allowedUserIds: ['@owner'] } });
+    expect(result.success).toBe(false);
+  });
+
+  it('has nowhere to put the token', () => {
+    // ADR-0018: a credential never lives in the configuration file. A strict
+    // table makes "token = ..." an error rather than a value quietly held.
+    const result = configSchema.safeParse({
+      ...VALID,
+      telegram: { allowedUserIds: [1], token: '123456:abc' },
+    });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error)).not.toContain('123456:abc');
+  });
+});
+
 describe('secretSchema', () => {
   it('produces a Secret rather than a string', () => {
     const parsed = secretSchema.parse('hunter2');

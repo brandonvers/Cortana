@@ -38,13 +38,25 @@
 
 import { type Agent, createAgent } from '@cortana/agent';
 import { auditedRunner } from '@cortana/audit';
-import { approvalThrough, type Channel, createChannel } from '@cortana/channel';
+import { approvalThrough, type Channel, type Conversation, createChannel } from '@cortana/channel';
 import type { Config } from '@cortana/config';
 import { AppError, type InstanceId, isAppError, type Logger } from '@cortana/core';
 import { workingProfile } from '@cortana/policy';
 import type { ModelRunner } from '@cortana/runner';
 import type { Writer } from '@cortana/storage';
+import {
+  createTelegramChannel,
+  type TelegramChannel,
+  type TelegramOptions,
+} from '@cortana/telegram';
+import type { ReadCredential } from './credentials.ts';
 import type { Component } from './lifecycle.ts';
+
+/** The name the bot's token is stored under, on every rung. */
+export const TELEGRAM_TOKEN = 'telegram-bot-token';
+
+/** How long to wait before trying Telegram again after it could not be reached. */
+const TELEGRAM_RETRY_MS = 30_000;
 
 /** Opens the model runner this daemon will use. Supplied by whoever picks one. */
 export type OpenRunner = () => Promise<ModelRunner>;
@@ -56,6 +68,14 @@ export interface ConversationOptions {
   readonly instanceId: InstanceId;
   /** Absent when nothing has chosen a provider, which is a supported state. */
   readonly openRunner?: OpenRunner;
+  /**
+   * Reads a credential from wherever this machine keeps them. Needed only when
+   * something configured needs one — today, the Telegram bot.
+   */
+  readonly readCredential?: ReadCredential;
+  /** Builds the bot. Replaced in tests, so that a test can be Telegram. */
+  readonly openTelegram?: (options: TelegramOptions) => TelegramChannel;
+  readonly telegramRetryMs?: number;
 }
 
 export interface ConversationParts {
@@ -166,35 +186,44 @@ export function conversationComponents(options: ConversationOptions): Conversati
     },
   };
 
+  /**
+   * One turn, from whichever channel it arrived on.
+   *
+   * Both channels call this, so a sentence reaches the agent the same way from a
+   * terminal and from a phone, and the agent — one session, one memory of the
+   * conversation — never learns which it was.
+   */
+  const answer = async (text: string, conversation: Conversation): Promise<string> => {
+    try {
+      const talking = await ensureAgent();
+      // The approver is whoever is on *this* connection, for this turn. An
+      // agent outlives the connections to it.
+      const exchange = await talking.say(text, approvalThrough(conversation));
+      return exchange.reply;
+    } catch (error) {
+      // The person is waiting for a sentence. A missing provider is the one
+      // failure they can act on themselves, so it reaches them as its own
+      // message rather than as a stack trace.
+      if (isAppError(error) && error.category === 'config') {
+        if (!announced) {
+          announced = true;
+          log.warn('someone tried to talk and no provider is available', {
+            reason: error.message,
+          });
+        }
+        return error.message;
+      }
+      throw error;
+    }
+  };
+
   const channelComponent: Component = {
     name: 'channel',
     async start() {
       const opened = createChannel({
         dataDir: options.config.dataDir,
         logger: log,
-        onSay: async (text, conversation) => {
-          try {
-            const talking = await ensureAgent();
-            // The approver is whoever is on *this* connection, for this turn.
-            // An agent outlives the connections to it.
-            const exchange = await talking.say(text, approvalThrough(conversation));
-            return exchange.reply;
-          } catch (error) {
-            // The person is at a terminal waiting for a sentence. A missing
-            // provider is the one failure they can act on themselves, so it
-            // reaches them as its own message rather than as a stack trace.
-            if (isAppError(error) && error.category === 'config') {
-              if (!announced) {
-                announced = true;
-                log.warn('someone tried to talk and no provider is available', {
-                  reason: error.message,
-                });
-              }
-              return error.message;
-            }
-            throw error;
-          }
-        },
+        onSay: answer,
       });
       await opened.start();
       channel = opened;
@@ -209,8 +238,120 @@ export function conversationComponents(options: ConversationOptions): Conversati
     },
   };
 
+  const telegramSettings = options.config.telegram;
+  const components: Component[] = [agentComponent, channelComponent];
+  if (telegramSettings !== undefined) {
+    components.push(
+      telegramComponent({
+        allowedUserIds: telegramSettings.allowedUserIds,
+        answer,
+        log,
+        ...(options.readCredential === undefined ? {} : { readCredential: options.readCredential }),
+        open: options.openTelegram ?? createTelegramChannel,
+        retryMs: options.telegramRetryMs ?? TELEGRAM_RETRY_MS,
+      }),
+    );
+  }
+
   return {
-    components: [agentComponent, channelComponent],
+    components,
     current: () => agent,
+  };
+}
+
+interface TelegramParts {
+  readonly allowedUserIds: readonly number[];
+  readonly answer: (text: string, conversation: Conversation) => Promise<string>;
+  readonly log: Logger;
+  readonly readCredential?: ReadCredential;
+  readonly open: (options: TelegramOptions) => TelegramChannel;
+  readonly retryMs: number;
+}
+
+/**
+ * The bot, as a component that comes up after the socket and goes down before it.
+ *
+ * ## Two kinds of failure at start, and they are treated oppositely
+ *
+ * **A credential that is missing, or a token Telegram refuses, stops the daemon.**
+ * Both are configuration — the operator turned the bot on and something they
+ * have to do is undone — and a daemon that came up without the channel it was
+ * told to open would look like it was working. They exit as configuration
+ * errors, which the unit does not restart, because restarting cannot fix them.
+ *
+ * **Telegram being unreachable does not.** CONCEPTS' second commitment is that a
+ * failing part must not take the system with it, and a network that is down at
+ * boot is the commonest failure there is. The socket still answers, the
+ * component reports itself failing, and it tries again until Telegram answers.
+ */
+function telegramComponent(parts: TelegramParts): Component {
+  const { log } = parts;
+  let channel: TelegramChannel | null = null;
+  let retry: NodeJS.Timeout | null = null;
+  let stopped = false;
+  /** Why it is not connected, while it is not. */
+  let trouble: string | null = null;
+
+  const connect = async (bot: TelegramChannel): Promise<void> => {
+    try {
+      await bot.start();
+      trouble = null;
+      // A stop that arrived while the connection was being made.
+      if (stopped) await bot.stop();
+    } catch (error) {
+      if (!(isAppError(error) && error.category === 'unavailable')) throw error;
+      trouble = error.message;
+      if (stopped) return;
+      log.warn('Telegram could not be reached, and will be tried again', {
+        reason: error.message,
+        retryMs: parts.retryMs,
+      });
+      retry = setTimeout(() => {
+        retry = null;
+        connect(bot).catch((later: unknown) => {
+          // Not at boot any more, so there is no start to fail: the socket is
+          // serving and this is said where an operator will look.
+          trouble = isAppError(later) ? later.message : String(later);
+          log.error('the Telegram channel gave up', { reason: trouble });
+        });
+      }, parts.retryMs);
+    }
+  };
+
+  return {
+    name: 'telegram',
+    async start() {
+      if (parts.readCredential === undefined) {
+        throw new AppError('the Telegram channel is configured and nothing can read its token', {
+          category: 'config',
+          code: 'no-credential-reader',
+        });
+      }
+      stopped = false;
+      const bot = parts.open({
+        token: parts.readCredential(TELEGRAM_TOKEN),
+        allowedUserIds: parts.allowedUserIds,
+        onSay: parts.answer,
+        logger: log,
+      });
+      channel = bot;
+      await connect(bot);
+    },
+    async stop() {
+      stopped = true;
+      if (retry !== null) clearTimeout(retry);
+      retry = null;
+      await channel?.stop();
+      channel = null;
+    },
+    health() {
+      if (channel === null) return { status: 'failing' as const, detail: 'not started' };
+      if (trouble !== null) return { status: 'failing' as const, detail: trouble };
+      if (!channel.running) return { status: 'failing' as const, detail: 'not polling' };
+      return {
+        status: 'ok' as const,
+        detail: `polling; ${channel.refused} update(s) from outside the allowlist dropped`,
+      };
+    },
   };
 }

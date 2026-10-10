@@ -133,6 +133,9 @@ importers:
       '@cortana/storage':
         specifier: workspace:*
         version: link:../storage
+      '@cortana/telegram':
+        specifier: workspace:*
+        version: link:../telegram
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@types/better-sqlite3@9.6.0)(better-sqlite3@13.0.3)

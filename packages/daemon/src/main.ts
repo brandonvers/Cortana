@@ -27,8 +27,10 @@ import {
   createLogger,
   type DetectionProbes,
   detectSecretProtection,
+  machineCredentialSources,
   probeThisMachine,
   type RunningKernel,
+  readCredential,
   startKernel,
 } from '@cortana/kernel';
 import { createClaudeRunner } from '@cortana/runner-claude';
@@ -61,9 +63,23 @@ function readVersion(): string {
  * line in their own file. The definition of done says "exits naming the setting
  * that is missing — never a stack trace", and this is that sentence in code.
  */
-function reportStartupFailure(error: unknown, destination: NodeJS.WritableStream): ExitCode {
+export function reportStartupFailure(error: unknown, destination: NodeJS.WritableStream): ExitCode {
   if (isAppError(error) && error.category === 'config') {
     destination.write(`${error.message}\n`);
+    return EXIT.CONFIGURATION;
+  }
+  // A component that failed to start *because of* configuration — a credential
+  // that is missing, a token that is refused — is a configuration error, and
+  // the exit code is what tells the unit not to restart. Reported as a start
+  // failure it was restarted every five seconds, forever, for something only
+  // the operator can fix.
+  if (
+    isAppError(error) &&
+    error.code === 'component-start-failed' &&
+    isAppError(error.cause) &&
+    error.cause.category === 'config'
+  ) {
+    destination.write(`${error.message}: ${error.cause.message}\n`);
     return EXIT.CONFIGURATION;
   }
   if (
@@ -155,7 +171,15 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<ExitCode> 
       ...(options.signalSource ? { process: options.signalSource } : {}),
     });
 
-    announceSecretProtection(logger, probeThisMachine(existsSync, env));
+    const probes = probeThisMachine(existsSync, env);
+    announceSecretProtection(logger, probes);
+    // The rung announced above is the rung read from: the same detection, so
+    // what the log says protects a credential is what is used to fetch it.
+    const credentials = machineCredentialSources(
+      detectSecretProtection(probes),
+      loaded.config.dataDir,
+      env,
+    );
     kernel = await startKernel({
       config: loaded.config,
       logger,
@@ -170,6 +194,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<ExitCode> 
       // on a machine that has not installed it, rather than doing everything it
       // can still do without one.
       openRunner: () => createClaudeRunner({ logger }),
+      readCredential: (name) => readCredential(name, credentials),
     });
   } catch (error) {
     watch?.dispose();

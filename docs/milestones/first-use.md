@@ -96,6 +96,22 @@ and the process never holds a key. On macOS it comes from the Keychain through
 the `security` command already on the system. The configuration names the
 credential; it never holds its value.
 
+> **What the step found.** Two failures that would only have shown on the
+> server. grammY's start retries an unreachable Telegram **forever** — measured
+> backing off from 100 ms to several seconds — so a network that was down at
+> boot was a daemon that never finished starting; the start now has a deadline,
+> and an unreachable Telegram leaves the socket serving while the bot tries
+> again. And a component that failed for a configuration reason exited as a
+> start failure, which the unit restarts: a missing token would have restarted
+> the daemon every five seconds, forever. It now exits as configuration, which
+> the unit leaves for the operator.
+>
+> The reader refuses rather than descends. On a machine whose credentials are
+> held by `systemd-creds`, a daemon started by hand is told to run as the
+> service; it is not handed a plaintext file because one happened to be there.
+> The unit line that gives the service its credential, `ImportCredential=`, is
+> named in the refusal and **not yet measured** — that is this step's work.
+
 **3. On the deployment target, for real.** The service's own user signs in to
 the provider once, with the provider's own login, and its credentials live in
 that user's home — which the unit already makes its state directory, the one

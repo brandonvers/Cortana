@@ -51,6 +51,18 @@ import { splitForTelegram } from './split.ts';
 /** How long an unanswered question waits before it is a no. The socket's figure. */
 const DEFAULT_ASK_TIMEOUT_MS = 120_000;
 
+/**
+ * How long `start` waits for Telegram to say who the bot is.
+ *
+ * grammY's own `init` retries a server error or a dropped connection **forever**,
+ * backing off from 100 ms to several seconds — measured, not read — so an
+ * unreachable Telegram at boot was a start that never returned, and a daemon
+ * that never finished coming up. Bounded here, a start either proves the token
+ * or says Telegram could not be reached, and whoever started it decides what
+ * to do about that.
+ */
+const DEFAULT_START_TIMEOUT_MS = 10_000;
+
 /** Telegram shows "typing…" for five seconds per call, so it is renewed inside that. */
 const TYPING_EVERY_MS = 4_000;
 
@@ -94,6 +106,8 @@ export interface TelegramOptions {
   readonly onSay: SayHandler;
   readonly logger?: Logger;
   readonly askTimeoutMs?: number;
+  /** How long to wait for Telegram at start before calling it unreachable. */
+  readonly startTimeoutMs?: number;
   readonly transport?: TelegramTransport;
   readonly botInfo?: UserFromGetMe;
 }
@@ -289,9 +303,15 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
 
   return {
     async start() {
+      const deadline = AbortSignal.timeout(options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS);
       try {
-        await bot.init();
+        // grammY types its signal as the `abort-controller` polyfill's. The
+        // platform's own is what it gets at runtime, and the test that gives up
+        // on an unreachable Telegram is what shows it is honoured.
+        await bot.init(deadline as never);
       } catch (error) {
+        // A 401 is not retried by grammY, so it arrives here at once and is
+        // the one answer that means the token itself is wrong.
         if (error instanceof GrammyError && error.error_code === 401) {
           throw new AppError('Telegram did not accept the bot token', {
             category: 'config',
@@ -301,7 +321,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
         throw new AppError('Telegram could not be reached to start the bot', {
           category: 'unavailable',
           code: 'telegram-unreachable',
-          detail: { error: describe(error) },
+          detail: { error: deadline.aborted ? 'no answer before the deadline' : describe(error) },
         });
       }
       log?.info('the Telegram channel is listening', {
