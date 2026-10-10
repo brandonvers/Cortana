@@ -34,6 +34,32 @@
 #
 # Verified on Debian 13 on 2026-09-01: starts, survives a reboot, and comes back
 # after SIGKILL with NRestarts=1. Making that pleasant is M6's problem.
+#
+# Two more steps when the Telegram channel is configured (`[telegram]` in
+# /etc/cortana/config.toml), both performed on the deployment target on
+# 2026-10-10 — Debian 13, systemd 257, no TPM:
+#
+#   3. The bot's token, encrypted for this machine. `--with-key=auto` seals it to
+#      the TPM where there is one and uses the root-only host key where there is
+#      not (ADR-0018, rungs 1 and 2). The value is read from stdin, so it is in
+#      no shell history and no process list. ImportCredential= below hands it to
+#      the service at start, in a directory only the service can read.
+#
+#   sudo install -d -m 0700 /etc/credstore.encrypted
+#   read -rsp 'token: ' T; printf '%s' "$T" | sudo systemd-creds encrypt \
+#       --with-key=auto --name=telegram-bot-token - /etc/credstore.encrypted/telegram-bot-token; unset T
+#
+#   4. The service user signs in to the provider once, with the provider's own
+#      login, so its credentials live in its own home — the state directory, the
+#      one place ProtectSystem=strict leaves writable. Cortana never handles them
+#      (ADR-0001). The login prints a link to open anywhere and asks for the code.
+#
+#   sudo -u cortana env HOME=/var/lib/cortana claude auth login --claudeai
+#   sudo -u cortana env HOME=/var/lib/cortana claude auth status --text
+#
+# Then `sudo systemctl restart cortana`. One token can be polled by one process:
+# a second machine running the same bot is refused by Telegram with a 409, so a
+# development copy has to be stopped before the server takes over.
 
 [Unit]
 Description=Cortana
@@ -57,6 +83,17 @@ ExecStart=/usr/bin/node /opt/cortana/packages/daemon/src/bin.ts
 StateDirectory=cortana
 StateDirectoryMode=0700
 ConfigurationDirectory=cortana
+
+# The Telegram bot's token, decrypted by systemd from /etc/credstore.encrypted/
+# into $CREDENTIALS_DIRECTORY before the process starts, so the daemon reads a
+# file it never held the key for.
+#
+# Safe to leave in on a machine without the bot, and that is measured rather
+# than read: the manual does not say what a missing credential does. On systemd
+# 257, `systemd-run --wait -p ImportCredential=<a name that does not exist>
+# /bin/true` finished with status 0/SUCCESS. The daemon is what refuses to start
+# when the bot is configured and its token is missing.
+ImportCredential=telegram-bot-token
 
 # Must exceed the daemon's own shutdown deadline, which defaults to 15s and is
 # capped at 600s. systemd sends SIGKILL when this expires, so a value below the

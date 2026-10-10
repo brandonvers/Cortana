@@ -42,16 +42,16 @@ half-working surface" — is the right reason. This does not break it quietly:
 
 ## Definition of done
 
-- [ ] A message from the owner's phone reaches the agent and the reply comes
+- [x] A message from the owner's phone reaches the agent and the reply comes
       back. A message from **any other account reaches nothing** — not the
       model, not the audit — and is counted rather than answered
 - [ ] An approval the policy engine puts to a person reaches the phone as two
       buttons, and **silence, a stale button, or a press from anyone else is a
       no**, which is the guarantee the socket's approvals already give
-- [ ] The bot's token is the **first credential [ADR-0018](../adr/0018-secrets-at-rest.md)
+- [x] The bot's token is the **first credential [ADR-0018](../adr/0018-secrets-at-rest.md)
       stores**: from `systemd-creds` on Linux, from the Keychain on macOS, never
       from `config.toml`, and never in a log line
-- [ ] It runs on the deployment target as the service, signed in to the
+- [x] It runs on the deployment target as the service, signed in to the
       provider **by the service's own user, through the provider's own login** —
       [ADR-0001](../adr/0001-model-access-behind-a-port.md) unchanged, no provider
       credential handled here. Measured on the machine, not described
@@ -117,6 +117,31 @@ the provider once, with the provider's own login, and its credentials live in
 that user's home — which the unit already makes its state directory, the one
 place `ProtectSystem=strict` leaves writable. The install notes in
 `cortana.service` gain the two lines this needs, and are re-run on the machine.
+
+> **What the step found.** It works as planned, and the plan's one unmeasured
+> line held: `ImportCredential=` on systemd 257 hands the service the token
+> that `systemd-creds encrypt --with-key=auto` sealed with the host key — this
+> machine has no TPM, so rung 2, as ADR-0018 predicted. The service user signed
+> in with `claude auth login` under its own home, and the daemon came up with
+> the bot polling and no restarts. The suite passes on the target itself, 672
+> tests.
+>
+> The unit now imports the credential by default, which needed a second
+> measurement because the manual does not say what a missing one does: a
+> throwaway unit importing a name that does not exist finished `0/SUCCESS`, so
+> a machine without the bot starts as before.
+>
+> Three things the plan did not say. The build already deployed was from
+> 2026-09-05, so "deploy" meant updating a checkout, not making one. **One token
+> is one poller**: Telegram refuses a second process polling the same bot, so a
+> development copy has to stop before the server takes over. And the allowlist
+> was demonstrated before it was configured: the owner's own first message
+> arrived from an id not yet on it, was dropped unanswered, and was counted —
+> which is also how the id was learned, without a third-party bot.
+>
+> **Approvals on a phone are not yet exercised live.** The agent has no tools,
+> so nothing asks; the guarantee stands on the tests from step 1 until a tool is
+> granted.
 
 **4. `cortana`.** The client `talk.manual.ts` already is, as a command.
 
