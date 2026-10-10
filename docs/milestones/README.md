@@ -15,7 +15,7 @@ is corrected in place and the correction says what changed.
 | M2 | Model runner port, audit, cost | [m2-model-runner.md](m2-model-runner.md) |
 | M3 | Chat, conversation loop, approvals | [m3-conversation.md](m3-conversation.md) |
 | M4 | [The roster: residents, delegation, report aggregation](m4-the-roster.md) | paused after step 4 |
-| — | [First use: reachable from a phone](first-use.md) — between M4's steps 4 and 5 | proposed |
+| — | [First use: reachable from a phone](first-use.md) — between M4's steps 4 and 5 | in progress |
 | M5 | Memory | not written — [blocked](../spikes/README.md#outstanding) |
 | M6 | Scheduler, durable jobs, budget governor | not written |
 | M7 | Dashboard, ops CLI, packaging | not written |

@@ -2,11 +2,13 @@
 
 **A self-hosted framework for running a team of AI agents on your own machine.**
 
-> **Status: pre-alpha. There is no working software yet.**
-> The repository currently holds the design, the decision record, and the project skeleton.
-> [M1 — the kernel skeleton](docs/milestones/m1-kernel-skeleton.md) is under way; the first
-> tagged build will be `0.1.0-alpha.1`, when it reaches its definition of done.
-> Nothing here is stable, and everything may change.
+> **Status: pre-alpha, and in daily use by its maintainer.**
+> [M1 to M3](docs/milestones/) are done: a kernel, a model port, and one agent that talks,
+> asks before it acts, and quarantines what it has not seen before.
+> [M4](docs/milestones/m4-the-roster.md) is half built and paused for
+> [first use](docs/milestones/first-use.md): that one agent now runs as a service on the
+> maintainer's own server, is reached from a phone over Telegram, and updates itself from
+> `main`. No version has been tagged yet. Nothing here is stable, and everything may change.
 >
 > ---
 >
