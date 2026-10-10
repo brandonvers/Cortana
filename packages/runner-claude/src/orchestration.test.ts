@@ -312,4 +312,17 @@ describe('the profile, on its way to the provider', () => {
     expect(options['strictMcpConfig']).toBe(true);
     expect(options['mcpServers']).toEqual({});
   });
+
+  it('names the permission mode rather than letting the provider pick one', async () => {
+    // SDK 0.3.286 made an omitted mode the provider's choice, and on a machine
+    // with telemetry off that choice is `auto`: a classifier decides, and
+    // `canUseTool` — one of the two surfaces above — stops being consulted.
+    expect((await optionsFor(QUARANTINE))['permissionMode']).toBe('default');
+  });
+
+  it('sends what the kernel composed as text, not as file mentions and commands', async () => {
+    // Without this an `@/path` in an inspected mail is a file the provider
+    // attaches before any tool call exists for the gate to refuse.
+    expect((await optionsFor(QUARANTINE))['verbatimPrompts']).toBe(true);
+  });
 });
