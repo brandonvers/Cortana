@@ -1,0 +1,13 @@
+# Looks at main a few minutes after boot, then five minutes after each look
+# finished — so a slow deploy is never overlapped by the next one.
+
+[Unit]
+Description=Cortana: look for a new version on main
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target

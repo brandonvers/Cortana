@@ -1,0 +1,37 @@
+# Follows main: see cortana-update.sh for what one run does and why.
+#
+# A template, like cortana.service. Two things are filled in at install time:
+# User= is whoever owns the deployed checkout (the one who can `git pull` it),
+# and the polkit rule beside this file names the same user.
+#
+#   OWNER=$(stat -c %U /opt/cortana)
+#   sudo usermod -aG systemd-journal "$OWNER"   # so it can see the new process start
+#   sed "s/^User=.*/User=$OWNER/" cortana-update.service | sudo tee /etc/systemd/system/cortana-update.service
+#   sudo cp cortana-update.timer /etc/systemd/system/
+#   sed "s/\"OWNER\"/\"$OWNER\"/" cortana-restart.rules | sudo tee /etc/polkit-1/rules.d/50-cortana-restart.rules
+#   sudo systemctl daemon-reload && sudo systemctl enable --now cortana-update.timer
+#
+# `systemctl list-timers cortana-update` says when it next looks, and
+# `journalctl -u cortana-update` says what each look found.
+
+[Unit]
+Description=Cortana: follow main
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=CHANGE-ME
+ExecStart=/opt/cortana/packages/daemon/packaging/cortana-update.sh
+Environment=CORTANA_CHECKOUT=/opt/cortana CORTANA_NODE_BIN=/opt/node/bin
+
+# Fetch, install, the whole suite and a restart. Generous, because a run cut
+# short in the middle of a deploy is the one outcome the script cannot clean
+# up after.
+TimeoutStartSec=20min
+
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=yes
+PrivateTmp=yes
