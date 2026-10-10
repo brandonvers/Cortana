@@ -426,6 +426,23 @@ describe('the token', () => {
     expect(channel.running).toBe(false);
   });
 
+  it('gives up on an unreachable Telegram at start rather than waiting forever', async () => {
+    // grammY retries a server error at start indefinitely. Without a deadline
+    // this start never returns, and neither does the daemon's.
+    const channel = createTelegramChannel({
+      token: new Secret(TOKEN),
+      allowedUserIds: [OWNER],
+      onSay: asking,
+      startTimeoutMs: 50,
+      transport: () => ({ ok: false, error_code: 502, description: 'Bad Gateway' }),
+    });
+
+    const error = await channel.start().catch((caught: unknown) => caught);
+
+    expect(isAppError(error) && error.category).toBe('unavailable');
+    expect(channel.running).toBe(false);
+  });
+
   it('does not reach the log when a failure quotes the request it came from', async () => {
     const { channel, texts, logger } = harness(async () => {
       throw new Error(`request to https://api.telegram.org/bot${TOKEN}/sendMessage failed`);

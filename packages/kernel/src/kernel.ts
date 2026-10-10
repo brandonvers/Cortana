@@ -46,7 +46,12 @@ import {
   type Writer,
 } from '@cortana/storage';
 import { eq } from 'drizzle-orm';
-import { conversationComponents, type OpenRunner } from './conversation.ts';
+import {
+  type ConversationOptions,
+  conversationComponents,
+  type OpenRunner,
+} from './conversation.ts';
+import type { ReadCredential } from './credentials.ts';
 import {
   type Component,
   createLifecycle,
@@ -86,6 +91,18 @@ export interface KernelOptions {
    * refuse to do everything it can still do without it.
    */
   readonly openRunner?: OpenRunner;
+  /**
+   * Reads a credential from wherever this machine keeps them.
+   *
+   * A function for the reason `openRunner` is one: the kernel has no opinion
+   * about processes, and which machine it is on — its environment, its
+   * Keychain, its systemd — is the process's to know.
+   */
+  readonly readCredential?: ReadCredential;
+  /** Builds the Telegram bot. Replaced in tests. */
+  readonly openTelegram?: ConversationOptions['openTelegram'];
+  /** How long to wait before trying an unreachable Telegram again. Shortened in tests. */
+  readonly telegramRetryMs?: number;
 }
 
 export interface RunningKernel {
@@ -220,6 +237,9 @@ export async function startKernel(options: KernelOptions): Promise<RunningKernel
     },
     instanceId,
     ...(options.openRunner === undefined ? {} : { openRunner: options.openRunner }),
+    ...(options.readCredential === undefined ? {} : { readCredential: options.readCredential }),
+    ...(options.openTelegram === undefined ? {} : { openTelegram: options.openTelegram }),
+    ...(options.telegramRetryMs === undefined ? {} : { telegramRetryMs: options.telegramRetryMs }),
   });
 
   const lifecycle = createLifecycle({

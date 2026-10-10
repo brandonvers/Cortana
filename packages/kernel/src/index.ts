@@ -1,3 +1,6 @@
+export { TELEGRAM_TOKEN } from './conversation.ts';
+export type { CredentialSources, ReadCredential } from './credentials.ts';
+export { KEYCHAIN_SERVICE, machineCredentialSources, readCredential } from './credentials.ts';
 export type {
   KernelEvents,
   KernelOptions,
