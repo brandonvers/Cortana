@@ -86,6 +86,11 @@ export interface Agent {
   readonly profile: Profile;
   readonly stopped: boolean;
   /**
+   * What continues this conversation in a later process, or null before the
+   * first turn — the session's own token, passed through unchanged.
+   */
+  readonly resumeToken: string | null;
+  /**
    * One turn. Resolves when the model has answered and every action it declared
    * has been decided.
    *
@@ -116,6 +121,11 @@ export interface AgentOptions {
   /** Who this agent is. The only part of the prompt a person writes. */
   readonly persona: string;
   readonly tier?: ModelTier;
+  /**
+   * A token from an earlier session of this runner, to carry on its
+   * conversation. The runner's to interpret; see `SessionSpec.resume`.
+   */
+  readonly resume?: string;
   /**
    * How a call the profile will not decide alone is put to a person.
    *
@@ -198,6 +208,7 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
       // all would mean the adapter refuses instead, which is the same answer
       // reached somewhere the reason is harder to find.
       approve: async (request, decision) => (await asking?.(request, decision)) ?? false,
+      ...(options.resume === undefined ? {} : { resume: options.resume }),
     },
     agentAnswer,
   );
@@ -300,6 +311,9 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
     profile,
     get stopped() {
       return session.stopped;
+    },
+    get resumeToken() {
+      return session.resumeToken;
     },
 
     say(input: string | Message, approve?: Approve): Promise<Exchange> {

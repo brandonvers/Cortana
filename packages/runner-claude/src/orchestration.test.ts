@@ -192,6 +192,48 @@ describe('what the log is told about rate limits', () => {
   });
 });
 
+describe('a conversation that outlives the process', () => {
+  it('learns what the provider calls its session, and offers it as the way to continue', async () => {
+    const runner = await createClaudeRunner({
+      openConversation: () =>
+        answers(
+          { type: 'system', subtype: 'init', session_id: 'provider-session-1' },
+          { ...success('hello'), session_id: 'provider-session-1' },
+        ),
+    });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: QUARANTINE });
+
+    expect(session.resumeToken).toBeNull();
+    await session.turn('hi');
+
+    expect(session.resumeToken).toBe('provider-session-1');
+    await session.stop();
+  });
+
+  it('asks the provider to continue a session only when told to', async () => {
+    const opened: Record<string, unknown>[] = [];
+    const runner = await createClaudeRunner({
+      openConversation: (params) => {
+        opened.push((params as { options: Record<string, unknown> }).options);
+        return answers(success('ok'));
+      },
+    });
+
+    const fresh = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: QUARANTINE });
+    const continued = await runner.start({
+      tier: 'fast',
+      systemPrompt: 'a',
+      profile: QUARANTINE,
+      resume: 'provider-session-1',
+    });
+    await fresh.stop();
+    await continued.stop();
+
+    expect(opened[0]).not.toHaveProperty('resume');
+    expect(opened[1]?.['resume']).toBe('provider-session-1');
+  });
+});
+
 describe('a turn with images', () => {
   /** The first user message the session sends, as the provider would read it. */
   async function firstMessage(

@@ -235,6 +235,10 @@ export async function startKernel(options: KernelOptions): Promise<RunningKernel
       if (!parts.writer) throw new Error('the writer must start before the conversation');
       return parts.writer;
     },
+    get storage(): Storage {
+      if (!parts.storage) throw new Error('storage must start before the conversation');
+      return parts.storage;
+    },
     instanceId,
     ...(options.openRunner === undefined ? {} : { openRunner: options.openRunner }),
     ...(options.readCredential === undefined ? {} : { readCredential: options.readCredential }),

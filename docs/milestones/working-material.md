@@ -84,6 +84,22 @@ a restart instead of fresh. Small, and first-hand: every merge to `main` is a
 deploy, and every deploy until now has been the agent forgetting the
 conversation.
 
+> **What the step found.** Continuing works across processes, measured with a
+> control: a session not continued did not know a word told to an earlier one
+> ("NONE"), and a new provider process continuing it by token did. The port's
+> token is required rather than optional, so a wrapper that forgot it does not
+> compile — the photos had taught that lesson a step earlier.
+>
+> **A lost conversation had to be told apart from a failed turn**, because
+> only the first is a reason to start afresh. Measured: the provider reports a
+> session it no longer has as the same subtype many failures share, with the
+> real reason in an `errors` field the adapter had never read. It reads it now,
+> says what the provider said for every failure, and names exactly this one
+> `resume-failed`. The kernel starts afresh on that code only, and asks the
+> message again of the new conversation so it is not lost; any other failure
+> keeps the conversation. `/new` sets it aside on purpose, because a
+> conversation continued forever is one that grows in cost forever.
+
 **3. Files out.** The agent's answer gains `attachments`: ids from the media
 store. The Telegram channel sends them as photos, videos or documents; the
 socket prints where they are. An id the store does not hold is refused, which

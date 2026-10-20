@@ -51,14 +51,24 @@ import { AppError, type InstanceId, isAppError, type Logger } from '@cortana/cor
 import { createMediaStore, type MediaStore } from '@cortana/media';
 import { workingProfile } from '@cortana/policy';
 import type { ModelRunner } from '@cortana/runner';
-import type { Writer } from '@cortana/storage';
+import type { Storage, Writer } from '@cortana/storage';
 import {
   createTelegramChannel,
   type TelegramChannel,
   type TelegramOptions,
 } from '@cortana/telegram';
+import { eq } from 'drizzle-orm';
 import type { ReadCredential } from './credentials.ts';
 import type { Component } from './lifecycle.ts';
+import { agentSessions } from './schema.ts';
+
+/** The agent this file runs. The roster's agents get their own names in M4. */
+const MAIN = 'main';
+
+/** What a person sends to set the conversation aside and begin another. */
+export const NEW_CONVERSATION = '/new';
+export const STARTED_OVER =
+  'Started a new conversation. What was said before is no longer carried forward.';
 
 /** The name the bot's token is stored under, on every rung. */
 export const TELEGRAM_TOKEN = 'telegram-bot-token';
@@ -73,6 +83,8 @@ export interface ConversationOptions {
   readonly config: Config;
   readonly logger: Logger;
   readonly writer: Writer;
+  /** Read from, for the one thing remembered between processes: the conversation's token. */
+  readonly storage: Storage;
   readonly instanceId: InstanceId;
   /** Absent when nothing has chosen a provider, which is a supported state. */
   readonly openRunner?: OpenRunner;
@@ -135,6 +147,46 @@ export function conversationComponents(options: ConversationOptions): Conversati
    * 263 MB each and keep the second.
    */
   let opening: Promise<Agent> | null = null;
+  /**
+   * Whether the agent was opened to continue a saved conversation and has not
+   * yet answered. Only then is a lost conversation a reason to start afresh:
+   * once a turn has worked, the conversation demonstrably exists.
+   */
+  let continuing = false;
+  let runnerName: string | null = null;
+
+  const savedConversation = (): { runner: string; resume: string } | null =>
+    options.storage.db
+      .select({ runner: agentSessions.runner, resume: agentSessions.resume })
+      .from(agentSessions)
+      .where(eq(agentSessions.agent, MAIN))
+      .get() ?? null;
+
+  const saveConversation = async (resume: string, runner: string): Promise<void> => {
+    await options.writer.write('remember where the conversation is', ({ db }) => {
+      const row = { agent: MAIN, runner, resume, updatedAt: Date.now() };
+      db.insert(agentSessions)
+        .values(row)
+        .onConflictDoUpdate({ target: agentSessions.agent, set: row })
+        .run();
+    });
+  };
+
+  const forgetConversation = async (): Promise<void> => {
+    await options.writer.write('forget where the conversation is', ({ db }) => {
+      db.delete(agentSessions).where(eq(agentSessions.agent, MAIN)).run();
+    });
+  };
+
+  /** Ends the agent's session, so the next message opens a new one. */
+  const startOver = async (): Promise<void> => {
+    await forgetConversation();
+    const stopping = agent;
+    agent = null;
+    continuing = false;
+    await stopping?.stop();
+  };
+
   const ensureAgent = async (): Promise<Agent> => {
     if (agent !== null && !agent.stopped) return agent;
     if (opening !== null) return opening;
@@ -153,15 +205,26 @@ export function conversationComponents(options: ConversationOptions): Conversati
         instanceId: options.instanceId,
         logger: log,
       });
+      // Carried on from the last process, when the same runner left a token.
+      // A token from another runner names nothing it could continue.
+      const saved = savedConversation();
+      const resume = saved !== null && saved.runner === runner.name ? saved.resume : undefined;
       const started = await createAgent({
         runner,
         profile,
         persona: options.config.agent.persona,
         tier: options.config.agent.tier,
         logger: log,
+        ...(resume === undefined ? {} : { resume }),
       });
       agent = started;
-      log.info('the agent is awake', { session: started.id, profile: profile.name });
+      continuing = resume !== undefined;
+      runnerName = runner.name;
+      log.info('the agent is awake', {
+        session: started.id,
+        profile: profile.name,
+        conversation: continuing ? 'continued' : 'new',
+      });
       return started;
     })();
 
@@ -231,15 +294,44 @@ export function conversationComponents(options: ConversationOptions): Conversati
       throw error;
     }
 
-    try {
+    if (sent.length === 0 && text.trim() === NEW_CONVERSATION) {
+      await startOver();
+      log.info('a new conversation was asked for');
+      return STARTED_OVER;
+    }
+
+    const message = sent.length === 0 ? text : { text, images: sent };
+    const turn = async (): Promise<string> => {
       const talking = await ensureAgent();
       // The approver is whoever is on *this* connection, for this turn. An
       // agent outlives the connections to it.
-      const exchange = await talking.say(
-        sent.length === 0 ? text : { text, images: sent },
-        approvalThrough(conversation),
-      );
+      const exchange = await talking.say(message, approvalThrough(conversation));
+      continuing = false;
+      const token = talking.resumeToken;
+      if (token !== null && runnerName !== null) {
+        const saved = savedConversation();
+        if (saved?.resume !== token || saved.runner !== runnerName) {
+          await saveConversation(token, runnerName);
+        }
+      }
       return exchange.reply;
+    };
+
+    try {
+      try {
+        return await turn();
+      } catch (error) {
+        // The one failure that is a reason to start afresh: the provider no
+        // longer has the conversation it was asked to continue — its files
+        // gone, the machine replaced. The message is not lost; it is asked
+        // again of a new conversation, once.
+        if (!(continuing && isAppError(error) && error.code === 'resume-failed')) throw error;
+        log.warn('the saved conversation could not be continued, so a new one is started', {
+          reason: error.message,
+        });
+        await startOver();
+        return await turn();
+      }
     } catch (error) {
       // The person is waiting for a sentence. A missing provider is the one
       // failure they can act on themselves, so it reaches them as its own

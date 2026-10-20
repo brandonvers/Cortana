@@ -270,6 +270,8 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
     const id = newSessionId();
     const queue = new PromptQueue();
     let stopped = false;
+    /** The provider's own name for this session, once it has said it. */
+    let providerSession: string | null = null;
     let totalCostUsd = 0;
 
     /**
@@ -307,6 +309,11 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
         // a file to attach before the model is asked anything, and no call
         // reaches the gate — measured in `mention.manual.ts`.
         verbatimPrompts: true,
+        // Continue an earlier conversation, when asked to. The provider keeps
+        // a session's history on disk under its id, and resuming loads it; a
+        // session it no longer has fails the first turn, in the provider
+        // category, and starting afresh is the caller's call.
+        ...(open.spec.resume === undefined ? {} : { resume: open.spec.resume }),
         // The permission rules go through the flag layer — the highest-priority
         // *user-controlled* tier — rather than through `managedSettings`, which
         // reads like the stronger choice and is not. Spike 0010 measured the
@@ -428,6 +435,13 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
             detail: { session: id },
           });
         }
+        // The provider names its session on every message it sends. That name
+        // is what continues this conversation in a later process, so it is
+        // kept as soon as it is seen rather than when the turn ends: a turn
+        // that fails has still started a session worth continuing.
+        const named = next.value['session_id'];
+        if (typeof named === 'string' && named !== '') providerSession = named;
+
         const state = rateLimitStateFrom(next.value);
         if (state) {
           options.onRateLimit?.(state);
@@ -485,6 +499,9 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
       runTurn,
       finish,
       conversation,
+      get resumeToken(): string | null {
+        return providerSession;
+      },
     };
   };
 
@@ -498,6 +515,9 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
         tier: session.tier,
         get stopped(): boolean {
           return session.stopped;
+        },
+        get resumeToken(): string | null {
+          return session.resumeToken;
         },
         stop: () => session.stop(),
         async turn(prompt: string, images: readonly TurnImage[] = []): Promise<TurnResult> {
@@ -520,6 +540,9 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
         tier: session.tier,
         get stopped(): boolean {
           return session.stopped;
+        },
+        get resumeToken(): string | null {
+          return session.resumeToken;
         },
         stop: () => session.stop(),
         async turn(

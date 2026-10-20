@@ -6,10 +6,12 @@ import { connect, socketPathFor } from '@cortana/channel';
 import { MODEL_TIERS as CONFIGURABLE_TIERS, type Config } from '@cortana/config';
 import { recordingLogger } from '@cortana/core/testing';
 import { MODEL_TIERS } from '@cortana/runner';
-import { fakeRunner } from '@cortana/runner/testing';
-import { desc } from 'drizzle-orm';
+import { type FakeRunner, fakeRunner } from '@cortana/runner/testing';
+import { desc, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { STARTED_OVER } from './conversation.ts';
 import { type RunningKernel, startKernel } from './kernel.ts';
+import { agentSessions } from './schema.ts';
 
 let root: string;
 let config: Config;
@@ -200,6 +202,84 @@ describe('what a conversation leaves behind', () => {
     expect(rows.map((row) => row.prompt)).toContain('said before the restart');
     // Two runs, two instance ids, one audit.
     expect(new Set(rows.map((row) => row.instanceId)).size).toBe(2);
+  });
+});
+
+describe('a conversation across restarts', () => {
+  /** A daemon on the same data directory, as a deploy leaves it. */
+  const restartWith = async (runner: FakeRunner) => {
+    await kernel?.stop('deploy');
+    kernel = await startKernel({
+      config,
+      logger: recordingLogger(),
+      version: '0.3.0',
+      openRunner: async () => runner,
+    });
+  };
+  const saved = () =>
+    kernel?.storage.db.select().from(agentSessions).where(eq(agentSessions.agent, 'main')).get();
+
+  it('carries on where it was, rather than starting again', async () => {
+    const { runner: first } = await start([answer('hello')]);
+    await say('my name is Brendon');
+    const token = saved()?.resume;
+    // The fake's token is its session's own id, as the provider's is.
+    expect(token).toBe(`fake-${String(first.turns[0]?.session)}`);
+
+    const second = fakeRunner({ values: [answer('you are Brendon')] });
+    await restartWith(second);
+    expect(await say('who am I?')).toBe('you are Brendon');
+
+    expect(second.opened[0]?.resume).toBe(token);
+  });
+
+  it('starts afresh when the conversation is gone, and the message still gets its answer', async () => {
+    await start([answer('hello')]);
+    await say('hello');
+    const token = saved()?.resume as string;
+
+    const second = fakeRunner({ values: [answer('a fresh start')], forgotten: [token] });
+    await restartWith(second);
+
+    expect(await say('are you there?')).toBe('a fresh start');
+    expect(second.opened.map((spec) => spec.resume)).toEqual([token, undefined]);
+    expect(saved()?.resume).not.toBe(token);
+  });
+
+  it('keeps the conversation when a turn fails for any other reason', async () => {
+    // A failed turn is not a lost conversation. Discarding it on the first
+    // error would trade a rate limit for the whole history.
+    await start([answer('hello')]);
+    await say('hello');
+    const token = saved()?.resume;
+
+    await restartWith(fakeRunner({ values: [] }));
+    await expect(say('are you there?')).rejects.toThrow();
+
+    expect(saved()?.resume).toBe(token);
+  });
+
+  it('ignores a token another runner left, which could name nothing it has', async () => {
+    await start([answer('hello')]);
+    await say('hello');
+
+    const other = fakeRunner({ values: [answer('hi')] });
+    await restartWith({ ...other, name: 'other' } as FakeRunner);
+    await say('hello again');
+
+    expect(other.opened[0]?.resume).toBeUndefined();
+  });
+
+  it('sets the conversation aside on /new, and the next message begins another', async () => {
+    const { runner } = await start([answer('hello'), answer('a new beginning')]);
+    await say('hello');
+
+    expect(await say('/new')).toBe(STARTED_OVER);
+    expect(saved()).toBeUndefined();
+    await say('first message of the new one');
+
+    expect(runner.sessions).toBe(2);
+    expect(runner.opened[1]?.resume).toBeUndefined();
   });
 });
 

@@ -82,6 +82,11 @@ export interface FakeScript {
   readonly usage?: Partial<TurnUsage>;
   /** `null` models an adapter that cannot report account usage. */
   readonly accountUsage?: AccountUsage | null;
+  /**
+   * Tokens this runner will not continue, as a provider that lost a
+   * conversation would: a session opened with one fails its first turn.
+   */
+  readonly forgotten?: readonly string[];
 }
 
 export interface FakeRunner extends ModelRunner {
@@ -155,12 +160,31 @@ export function fakeRunner(script: FakeScript = {}): FakeRunner {
     opened.push(spec);
     const id = newSessionId();
     let stopped = false;
+    // A continued conversation keeps the token it was continued from, as the
+    // provider keeps a resumed session's id. A new one gets its own.
+    const token = spec.resume ?? `fake-${id}`;
+    const lost = spec.resume !== undefined && (script.forgotten ?? []).includes(spec.resume);
+    let turned = false;
 
     return {
       id,
       tier: spec.tier,
       get stopped(): boolean {
         return stopped;
+      },
+      get resumeToken(): string | null {
+        return turned ? token : null;
+      },
+      /** The first turn of a session opened on a forgotten token fails, as the provider's does. */
+      refuseIfForgotten(): void {
+        if (lost) {
+          throw new AppError(`no conversation could be continued from "${spec.resume}"`, {
+            category: 'provider',
+            code: 'resume-failed',
+            detail: { session: id },
+          });
+        }
+        turned = true;
       },
       async stop(): Promise<void> {
         stopped = true;
@@ -196,9 +220,13 @@ export function fakeRunner(script: FakeScript = {}): FakeRunner {
         get stopped(): boolean {
           return base.stopped;
         },
+        get resumeToken(): string | null {
+          return base.resumeToken;
+        },
         stop: () => base.stop(),
         async turn(prompt: string, images: readonly TurnImage[] = []): Promise<TurnResult> {
           base.refuseIfStopped();
+          base.refuseIfForgotten();
           turns.push({ session: base.id, prompt, structured: false, images });
           return { text: nextText(), usage };
         },
@@ -216,12 +244,16 @@ export function fakeRunner(script: FakeScript = {}): FakeRunner {
         get stopped(): boolean {
           return base.stopped;
         },
+        get resumeToken(): string | null {
+          return base.resumeToken;
+        },
         stop: () => base.stop(),
         async turn(
           prompt: string,
           images: readonly TurnImage[] = [],
         ): Promise<StructuredTurnResult<Value>> {
           base.refuseIfStopped();
+          base.refuseIfForgotten();
           turns.push({ session: base.id, prompt, structured: true, images });
 
           const parsed = schema.safeParse(nextValue(prompt));
