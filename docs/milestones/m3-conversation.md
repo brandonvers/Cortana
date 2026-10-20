@@ -184,9 +184,13 @@ node packages/runner-claude/src/escape.manual.ts     # spike 0011's escape test
 And to talk to a running daemon, which needs a provider but is not a check:
 
 ```bash
-node packages/channel/src/talk.manual.ts             # a line at a time
-node packages/channel/src/talk.manual.ts "hello"     # or one shot
+pnpm cortana                                         # a line at a time
+pnpm cortana "hello"                                 # or one shot
 ```
+
+> Corrected during [first use](first-use.md): this was `talk.manual.ts`, and it
+> is now the `cortana` command, which asks you about approvals rather than
+> refusing them unseen.
 
 The escape test **runs its positive control first and refuses to report on the
 locks if the control does not escape**. That is the finding spike 0011 exists

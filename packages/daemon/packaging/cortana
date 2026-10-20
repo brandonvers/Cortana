@@ -1,0 +1,15 @@
+#!/bin/sh
+# `cortana` on the machine the service runs on: talks to it as the user it runs
+# as, which is the only user its socket lets in (the data directory is 0700).
+#
+# The data directory is named here because systemd tells the service where it
+# is (STATE_DIRECTORY=/var/lib/cortana) and nothing tells a shell. Paths match
+# cortana.service; change both together.
+#
+#   sudo install -m 0755 /opt/cortana/packages/daemon/packaging/cortana /usr/local/bin/cortana
+#
+# It asks for your sudo password, because that is what being allowed to speak
+# for the service means on this machine.
+
+exec sudo -u cortana env CORTANA_DATA_DIR=/var/lib/cortana \
+  /opt/node/bin/node /opt/cortana/packages/channel/src/cortana.ts "$@"

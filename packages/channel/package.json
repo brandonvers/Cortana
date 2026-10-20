@@ -8,6 +8,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "bin": {
+    "cortana": "./src/cortana.ts"
+  },
   "files": [
     "src"
   ],
