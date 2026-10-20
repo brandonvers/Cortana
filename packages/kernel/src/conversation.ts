@@ -36,11 +36,19 @@
  * this file only knows there is a port.
  */
 
-import { type Agent, createAgent } from '@cortana/agent';
+import { join } from 'node:path';
+import { type Agent, createAgent, type SentImage } from '@cortana/agent';
 import { auditedRunner } from '@cortana/audit';
-import { approvalThrough, type Channel, type Conversation, createChannel } from '@cortana/channel';
+import {
+  approvalThrough,
+  type Channel,
+  type Conversation,
+  createChannel,
+  type IncomingImage,
+} from '@cortana/channel';
 import type { Config } from '@cortana/config';
 import { AppError, type InstanceId, isAppError, type Logger } from '@cortana/core';
+import { createMediaStore, type MediaStore } from '@cortana/media';
 import { workingProfile } from '@cortana/policy';
 import type { ModelRunner } from '@cortana/runner';
 import type { Writer } from '@cortana/storage';
@@ -193,12 +201,44 @@ export function conversationComponents(options: ConversationOptions): Conversati
    * terminal and from a phone, and the agent — one session, one memory of the
    * conversation — never learns which it was.
    */
-  const answer = async (text: string, conversation: Conversation): Promise<string> => {
+  /**
+   * Where what the person sends is kept. Opened on the first image rather than
+   * at construction: this runs before the storage component has made the data
+   * directory, and a store that made it first would make it with its own mode.
+   */
+  let media: MediaStore | null = null;
+  const store = (): MediaStore => {
+    media ??= createMediaStore({ dir: join(options.config.dataDir, 'media') });
+    return media;
+  };
+
+  const answer = async (
+    text: string,
+    conversation: Conversation,
+    images?: readonly IncomingImage[],
+  ): Promise<string> => {
+    // Kept before the turn, so the agent is handed ids the store already holds.
+    // A file the store refuses — not an image, or too large to show — is the
+    // person's to hear about, in the store's own words, and no turn is spent.
+    let sent: SentImage[] = [];
+    try {
+      sent = (images ?? []).map((image) => {
+        const held = store().put(image.data);
+        return { id: held.id, mediaType: held.mediaType, data: image.data };
+      });
+    } catch (error) {
+      if (isAppError(error) && error.category === 'contract') return error.message;
+      throw error;
+    }
+
     try {
       const talking = await ensureAgent();
       // The approver is whoever is on *this* connection, for this turn. An
       // agent outlives the connections to it.
-      const exchange = await talking.say(text, approvalThrough(conversation));
+      const exchange = await talking.say(
+        sent.length === 0 ? text : { text, images: sent },
+        approvalThrough(conversation),
+      );
       return exchange.reply;
     } catch (error) {
       // The person is waiting for a sentence. A missing provider is the one
@@ -261,7 +301,11 @@ export function conversationComponents(options: ConversationOptions): Conversati
 
 interface TelegramParts {
   readonly allowedUserIds: readonly number[];
-  readonly answer: (text: string, conversation: Conversation) => Promise<string>;
+  readonly answer: (
+    text: string,
+    conversation: Conversation,
+    images?: readonly IncomingImage[],
+  ) => Promise<string>;
   readonly log: Logger;
   readonly readCredential?: ReadCredential;
   readonly open: (options: TelegramOptions) => TelegramChannel;

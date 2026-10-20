@@ -130,6 +130,22 @@ export interface StructuredTurnResult<Value> extends TurnResult {
  * problem depends on whether such an agent exists, which M3 finds out. The resume
  * path is still there if it does, and it needs measuring before it is used.
  */
+/**
+ * An image handed to a turn beside its text.
+ *
+ * Bytes and a type, and nothing about where they came from: the port knows
+ * nothing of files, stores or channels, and an adapter that wanted a path would
+ * be an adapter that could be handed one. The four types are the ones the
+ * provider takes; `@cortana/media` decides which bytes are which, and a test
+ * in the kernel holds the two lists together.
+ */
+export const TURN_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const;
+
+export interface TurnImage {
+  readonly mediaType: (typeof TURN_IMAGE_TYPES)[number];
+  readonly data: Uint8Array;
+}
+
 interface SessionBase {
   readonly id: SessionId;
   readonly tier: ModelTier;
@@ -140,7 +156,7 @@ interface SessionBase {
 
 /** A session whose answers are prose. */
 export interface ModelSession extends SessionBase {
-  turn(prompt: string): Promise<TurnResult>;
+  turn(prompt: string, images?: readonly TurnImage[]): Promise<TurnResult>;
 }
 
 /**
@@ -153,7 +169,7 @@ export interface ModelSession extends SessionBase {
  * `AppError` in the `provider` category, and is never coerced into looking valid.
  */
 export interface StructuredSession<Value> extends SessionBase {
-  turn(prompt: string): Promise<StructuredTurnResult<Value>>;
+  turn(prompt: string, images?: readonly TurnImage[]): Promise<StructuredTurnResult<Value>>;
 }
 
 /**

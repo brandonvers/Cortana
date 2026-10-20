@@ -7,7 +7,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createTelegramChannel,
   FORWARDED_REFUSAL,
-  TEXT_ONLY,
+  NOT_PASSED_ON,
+  PHOTO_NOT_FETCHED,
   type TelegramOptions,
   type TelegramResponse,
   TURN_FAILED,
@@ -112,8 +113,15 @@ function harness(onSay: TelegramOptions['onSay'], extra: Partial<TelegramOptions
           text: payload['text'],
         });
       }
+      if (method === 'getFile') {
+        const id = String(payload['file_id']);
+        return ok({ file_id: id, file_unique_id: id, file_path: `photos/${id}.jpg` });
+      }
       return ok(true);
     },
+    // Telegram's file server, played by the test: the bytes spell the path.
+    download: async (filePath) => new TextEncoder().encode(filePath),
+    albumWindowMs: 30,
     ...extra,
   });
   const of = (method: string) => calls.filter((call) => call.method === method);
@@ -195,17 +203,17 @@ describe('what reaches the agent', () => {
     expect(onSay).not.toHaveBeenCalled();
   });
 
-  it('says that only text is passed on, rather than ignoring a photo', async () => {
+  it('says what is not passed on, rather than ignoring a voice message', async () => {
     const onSay = vi.fn(async () => 'no');
     const { channel, texts } = harness(onSay);
 
     await channel.receive(
       message(OWNER, undefined, {
-        photo: [{ file_id: 'f', file_unique_id: 'u', width: 1, height: 1 }],
+        voice: { file_id: 'v', file_unique_id: 'v', duration: 3 },
       }),
     );
 
-    await vi.waitFor(() => expect(texts()).toEqual([TEXT_ONLY]));
+    await vi.waitFor(() => expect(texts()).toEqual([NOT_PASSED_ON]));
     expect(onSay).not.toHaveBeenCalled();
   });
 
@@ -233,6 +241,147 @@ describe('what reaches the agent', () => {
     await channel.receive(message(OWNER, 'say nothing'));
 
     await vi.waitFor(() => expect(texts()).toEqual([EMPTY_REPLY]));
+  });
+});
+
+/** A photo message: Telegram's sizes, smallest first, the largest last. */
+const photo = (fileId: string, extra: Record<string, unknown> = {}) =>
+  message(OWNER, undefined, {
+    photo: [
+      { file_id: `${fileId}-small`, file_unique_id: 's', width: 90, height: 90 },
+      { file_id: fileId, file_unique_id: fileId, width: 1280, height: 960 },
+    ],
+    ...extra,
+  });
+
+const decoded = (images: readonly { data: Uint8Array }[] | undefined) =>
+  (images ?? []).map((image) => new TextDecoder().decode(image.data));
+
+describe('a photo', () => {
+  it('reaches the agent as the largest size Telegram made, with its caption as the text', async () => {
+    const onSay = vi.fn(
+      async (
+        _text: string,
+        _conversation: Conversation,
+        _images?: readonly { data: Uint8Array }[],
+      ) => 'a nice car',
+    );
+    const { channel, texts } = harness(onSay);
+
+    await channel.receive(photo('big', { caption: 'Write a post about this' }));
+
+    await vi.waitFor(() => expect(texts()).toEqual(['a nice car']));
+    const [text, , images] = onSay.mock.calls[0] ?? [];
+    expect(text).toBe('Write a post about this');
+    expect(decoded(images)).toEqual(['photos/big.jpg']);
+  });
+
+  it('is passed on with no text when it has no caption', async () => {
+    const onSay = vi.fn(async (_text: string) => 'ok');
+    const { channel } = harness(onSay);
+
+    await channel.receive(photo('bare'));
+
+    await vi.waitFor(() => expect(onSay).toHaveBeenCalled());
+    expect(onSay.mock.calls[0]?.[0]).toBe('');
+  });
+
+  it('can arrive as a file, and is a photo all the same', async () => {
+    const onSay = vi.fn(
+      async (
+        _text: string,
+        _conversation: Conversation,
+        _images?: readonly { data: Uint8Array }[],
+      ) => 'ok',
+    );
+    const { channel } = harness(onSay);
+
+    await channel.receive(
+      message(OWNER, undefined, {
+        document: { file_id: 'original', file_unique_id: 'o', mime_type: 'image/jpeg' },
+      }),
+    );
+
+    await vi.waitFor(() => expect(onSay).toHaveBeenCalled());
+    expect(decoded(onSay.mock.calls[0]?.[2])).toEqual(['photos/original.jpg']);
+  });
+
+  it('is not passed on when it is any other kind of file', async () => {
+    const onSay = vi.fn(async () => 'no');
+    const { channel, texts } = harness(onSay);
+
+    await channel.receive(
+      message(OWNER, undefined, {
+        document: { file_id: 'pdf', file_unique_id: 'p', mime_type: 'application/pdf' },
+      }),
+    );
+
+    await vi.waitFor(() => expect(texts()).toEqual([NOT_PASSED_ON]));
+    expect(onSay).not.toHaveBeenCalled();
+  });
+
+  it('says so when it could not be fetched, rather than sending the agent nothing', async () => {
+    const onSay = vi.fn(async () => 'no');
+    const { channel, texts } = harness(onSay, {
+      download: async () => {
+        throw new Error('connection reset');
+      },
+    });
+
+    await channel.receive(photo('lost'));
+
+    await vi.waitFor(() => expect(texts()).toEqual([PHOTO_NOT_FETCHED]));
+    expect(onSay).not.toHaveBeenCalled();
+  });
+
+  it('is refused when forwarded, like any forwarded message', async () => {
+    const onSay = vi.fn(async () => 'no');
+    const { channel, texts } = harness(onSay);
+
+    await channel.receive(
+      photo('theirs', { forward_origin: { type: 'user', date: 0, sender_user: person(STRANGER) } }),
+    );
+
+    await vi.waitFor(() => expect(texts()).toEqual([FORWARDED_REFUSAL]));
+    expect(onSay).not.toHaveBeenCalled();
+  });
+});
+
+describe('an album', () => {
+  it('is one turn with every photo in it, in the order they came', async () => {
+    const onSay = vi.fn(
+      async (
+        _text: string,
+        _conversation: Conversation,
+        _images?: readonly { data: Uint8Array }[],
+      ) => 'three photos',
+    );
+    const { channel, texts } = harness(onSay);
+
+    await channel.receive(photo('one', { media_group_id: 'g1', caption: 'A slideshow of these' }));
+    await channel.receive(photo('two', { media_group_id: 'g1' }));
+    await channel.receive(photo('three', { media_group_id: 'g1' }));
+
+    await vi.waitFor(() => expect(texts()).toEqual(['three photos']));
+    expect(onSay).toHaveBeenCalledTimes(1);
+    const [text, , images] = onSay.mock.calls[0] ?? [];
+    expect(text).toBe('A slideshow of these');
+    expect(decoded(images)).toEqual(['photos/one.jpg', 'photos/two.jpg', 'photos/three.jpg']);
+  });
+
+  it('keeps its place: a message sent after it is answered after it', async () => {
+    const order: string[] = [];
+    const { channel } = harness(async (text, _conversation, images) => {
+      order.push(images === undefined ? text : `album of ${images.length}`);
+      return 'ok';
+    });
+
+    await channel.receive(photo('a', { media_group_id: 'g2' }));
+    await channel.receive(photo('b', { media_group_id: 'g2' }));
+    await channel.receive(message(OWNER, 'and one more thing'));
+
+    await vi.waitFor(() => expect(order).toHaveLength(2));
+    expect(order).toEqual(['album of 2', 'and one more thing']);
   });
 });
 

@@ -41,7 +41,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import type { Conversation, SayHandler } from '@cortana/channel';
+import type { Conversation, IncomingImage, SayHandler } from '@cortana/channel';
 import type { Secret } from '@cortana/config';
 import { AppError, isAppError, type Logger } from '@cortana/core';
 import { Bot, GrammyError, InlineKeyboard } from 'grammy';
@@ -71,8 +71,24 @@ export const FORWARDED_REFUSAL =
   'though you had written them. That is not allowed yet — copy the part you mean ' +
   'into a message of your own.';
 
-export const TEXT_ONLY =
-  'Only text reaches the agent for now. Photos, voice and files are not passed on.';
+export const NOT_PASSED_ON =
+  'Text and photos reach the agent; voice, video and other files are not passed on yet.';
+
+export const PHOTO_NOT_FETCHED =
+  'A photo could not be fetched from Telegram, so nothing was sent to the agent. ' +
+  'Try sending it again.';
+
+/**
+ * How long an album is waited on after its latest photo.
+ *
+ * Telegram delivers an album as one update per photo, sharing a
+ * `media_group_id`, with nothing to say which is the last. A second is far more
+ * than the gap between them and short enough that nobody notices it.
+ */
+const DEFAULT_ALBUM_WINDOW_MS = 1_000;
+
+/** The most Telegram lets a bot download, in bytes. Its own limit, not a choice. */
+const TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
 
 export const TURN_FAILED = 'Something went wrong answering that. The details are in the log.';
 
@@ -108,6 +124,12 @@ export interface TelegramOptions {
   readonly askTimeoutMs?: number;
   /** How long to wait for Telegram at start before calling it unreachable. */
   readonly startTimeoutMs?: number;
+  readonly albumWindowMs?: number;
+  /**
+   * Fetches a file Telegram holds, by the path `getFile` gave for it. Replaced
+   * in tests, so a test can be Telegram's file server too.
+   */
+  readonly download?: (filePath: string) => Promise<Uint8Array>;
   readonly transport?: TelegramTransport;
   readonly botInfo?: UserFromGetMe;
 }
@@ -226,7 +248,11 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
     },
   });
 
-  const runTurn = async (chatId: number, text: string): Promise<void> => {
+  const runTurn = async (
+    chatId: number,
+    text: string,
+    images?: readonly IncomingImage[],
+  ): Promise<void> => {
     const typing = () => {
       bot.api.sendChatAction(chatId, 'typing').catch(() => {
         // Cosmetic. A failed indicator is not worth a log line per renewal.
@@ -235,7 +261,12 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
     typing();
     const renew = setInterval(typing, TYPING_EVERY_MS);
     try {
-      const reply = await options.onSay(text, conversationIn(chatId));
+      // A text message is said exactly as it was before photos existed.
+      const conversation = conversationIn(chatId);
+      const reply =
+        images === undefined
+          ? await options.onSay(text, conversation)
+          : await options.onSay(text, conversation, images);
       await tell(chatId, reply);
     } catch (error) {
       log?.error('a turn failed', { error: describe(error) });
@@ -281,6 +312,105 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
     await ctx.answerCallbackQuery().catch(() => {});
   });
 
+  const download =
+    options.download ??
+    (async (filePath: string): Promise<Uint8Array> => {
+      // The token is in this URL, so it appears in no error: a failure says
+      // what happened, never where.
+      const response = await fetch(
+        `https://api.telegram.org/file/bot${options.token.expose()}/${filePath}`,
+        { signal: AbortSignal.timeout(60_000) },
+      ).catch(() => {
+        throw new Error('the file could not be fetched from Telegram');
+      });
+      if (!response.ok) throw new Error(`Telegram answered ${response.status} for a file`);
+      const data = new Uint8Array(await response.arrayBuffer());
+      if (data.length > TELEGRAM_DOWNLOAD_LIMIT) throw new Error('the file is over 20 MB');
+      return data;
+    });
+
+  /**
+   * A photo's bytes, as a value that never rejects.
+   *
+   * It starts as soon as the update arrives and is awaited only when its turn
+   * comes, and a promise that rejected in between with nothing attached would
+   * reach the daemon's unhandled-rejection handler — which ends the process.
+   */
+  const fetchImage = (fileId: string): Promise<IncomingImage | null> =>
+    bot.api
+      .getFile(fileId)
+      .then((file) => {
+        if (file.file_path === undefined) throw new Error('Telegram gave no path for the file');
+        return download(file.file_path);
+      })
+      .then(
+        (data) => ({ data }),
+        (error: unknown) => {
+          log?.error('a photo could not be fetched', { error: describe(error) });
+          return null;
+        },
+      );
+
+  const runPhotoTurn = async (
+    chatId: number,
+    text: string,
+    fetched: readonly Promise<IncomingImage | null>[],
+  ): Promise<void> => {
+    const images = await Promise.all(fetched);
+    if (images.some((image) => image === null)) {
+      await tell(chatId, PHOTO_NOT_FETCHED);
+      return;
+    }
+    await runTurn(chatId, text, images as IncomingImage[]);
+  };
+
+  interface Album {
+    readonly fetched: Promise<IncomingImage | null>[];
+    caption: string;
+    timer: NodeJS.Timeout | null;
+    close(): void;
+  }
+  const albums = new Map<string, Album>();
+  const albumWindowMs = options.albumWindowMs ?? DEFAULT_ALBUM_WINDOW_MS;
+
+  /**
+   * One photo of an album, joined to the others by their group id.
+   *
+   * The album's place in the queue is taken when its first photo arrives, not
+   * when the window closes, so a message sent after an album is answered after
+   * it. The turn itself waits for the window to close, then takes every photo
+   * the album gathered.
+   */
+  const joinAlbum = (
+    groupId: string,
+    chatId: number,
+    fetched: Promise<IncomingImage | null>,
+    caption: string,
+  ): void => {
+    let album = albums.get(groupId);
+    if (album === undefined) {
+      let close: () => void = () => {};
+      const closed = new Promise<void>((resolve) => {
+        close = resolve;
+      });
+      const created: Album = { fetched: [], caption: '', timer: null, close };
+      album = created;
+      albums.set(groupId, created);
+      tail = tail.then(async () => {
+        await closed;
+        await runPhotoTurn(chatId, created.caption, created.fetched);
+      });
+    }
+    album.fetched.push(fetched);
+    if (caption !== '') album.caption = caption;
+    if (album.timer !== null) clearTimeout(album.timer);
+    const current = album;
+    album.timer = setTimeout(() => {
+      albums.delete(groupId);
+      current.close();
+    }, albumWindowMs);
+  };
+
   bot.on('message', (ctx) => {
     const chatId = ctx.chat.id;
     const message = ctx.message;
@@ -288,8 +418,25 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
       tail = tail.then(() => tell(chatId, FORWARDED_REFUSAL));
       return;
     }
+
+    // The largest size Telegram made of a photo is the last one, and a picture
+    // sent "as a file" keeps its original — either is a photo to the agent.
+    const fileId =
+      message.photo?.at(-1)?.file_id ??
+      (message.document?.mime_type?.startsWith('image/') ? message.document.file_id : undefined);
+    if (fileId !== undefined) {
+      const fetched = fetchImage(fileId);
+      const caption = message.caption ?? '';
+      if (message.media_group_id !== undefined) {
+        joinAlbum(message.media_group_id, chatId, fetched, caption);
+        return;
+      }
+      tail = tail.then(() => runPhotoTurn(chatId, caption, [fetched]));
+      return;
+    }
+
     if (message.text === undefined) {
-      tail = tail.then(() => tell(chatId, TEXT_ONLY));
+      tail = tail.then(() => tell(chatId, NOT_PASSED_ON));
       return;
     }
     const text = message.text;
@@ -346,6 +493,13 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
 
     async stop() {
       started = false;
+      // An album still gathering is let go: its turn runs with what arrived, if
+      // the daemon is still there to run it, and its timer keeps nothing alive.
+      for (const album of albums.values()) {
+        if (album.timer !== null) clearTimeout(album.timer);
+        album.close();
+      }
+      albums.clear();
       if (bot.isRunning()) await bot.stop();
       for (const question of [...open.values()]) question.settle(false, CLOSED);
     },

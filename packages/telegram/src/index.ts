@@ -4,5 +4,11 @@ export type {
   TelegramResponse,
   TelegramTransport,
 } from './bot.ts';
-export { createTelegramChannel, FORWARDED_REFUSAL, TEXT_ONLY, TURN_FAILED } from './bot.ts';
+export {
+  createTelegramChannel,
+  FORWARDED_REFUSAL,
+  NOT_PASSED_ON,
+  PHOTO_NOT_FETCHED,
+  TURN_FAILED,
+} from './bot.ts';
 export { EMPTY_REPLY, splitForTelegram, TELEGRAM_MAX_MESSAGE } from './split.ts';

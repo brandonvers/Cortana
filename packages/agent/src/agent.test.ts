@@ -112,6 +112,50 @@ describe('a turn', () => {
     expect(exchange.actions).toEqual([]);
   });
 
+  it('shows the model the images, and tells it what they are called', async () => {
+    const runner = fakeRunner({ values: [answer('A white E90.')] });
+    const agent = await createAgent({ runner, profile: WORKING, persona: 'p' });
+    const photo = {
+      id: '0123456789abcdef',
+      mediaType: 'image/jpeg' as const,
+      data: Uint8Array.from([0xff, 0xd8, 0xff]),
+    };
+
+    await agent.say({ text: 'What car is this?', images: [photo] });
+
+    const [turn] = runner.turns;
+    expect(turn?.images).toEqual([photo]);
+    expect(turn?.prompt).toContain('What car is this?');
+    expect(turn?.prompt).toContain('0123456789abcdef (image/jpeg)');
+  });
+
+  it('says so when a message is only images', async () => {
+    const runner = fakeRunner({ values: [answer('Two photos of a gearbox.')] });
+    const agent = await createAgent({ runner, profile: WORKING, persona: 'p' });
+    const photo = (id: string) => ({
+      id,
+      mediaType: 'image/png' as const,
+      data: Uint8Array.from([0x89, 0x50]),
+    });
+
+    await agent.say({ text: '', images: [photo('aaaaaaaaaaaaaaaa'), photo('bbbbbbbbbbbbbbbb')] });
+
+    const prompt = runner.turns[0]?.prompt ?? '';
+    expect(prompt).toContain('(no text, only the images)');
+    expect(prompt).toContain('2 images');
+    expect(prompt).toContain('2. bbbbbbbbbbbbbbbb');
+  });
+
+  it('sends a plain string exactly as before, with no images', async () => {
+    const runner = fakeRunner({ values: [answer('ok')] });
+    const agent = await createAgent({ runner, profile: WORKING, persona: 'p' });
+
+    await agent.say('hello');
+
+    expect(runner.turns[0]?.prompt).toBe('hello');
+    expect(runner.turns[0]?.images).toEqual([]);
+  });
+
   it('reports what a turn cost, so the audit and the governor see the same number', async () => {
     const agent = await agentOver([answer('ok')]);
 

@@ -38,6 +38,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { crc32, deflateSync } from 'node:zlib';
 import { isAppError } from '@cortana/core';
 import type { Profile } from '@cortana/policy';
 import { z } from 'zod';
@@ -190,6 +191,27 @@ export function modelRunnerContract(): readonly ContractCase[] {
 
         assert.equal(typeof result.text, 'string');
         assert.ok(result.text.length > 0, 'a prose turn must produce something');
+        await session.stop();
+      },
+    },
+
+    {
+      name: 'takes an image beside the text of a turn',
+      async run(runner) {
+        const session = await runner.start({
+          tier: 'fast',
+          systemPrompt: 'Answer briefly.',
+          profile: CONTRACT_PROFILE,
+        });
+        // A real picture rather than bytes that look like one: the provider
+        // decodes what it is given, and a case that sent it a header and
+        // nothing else would be measuring the provider's error message.
+        const result = await session.turn('What colour is this image? Answer with one word.', [
+          { mediaType: 'image/png', data: solidPng(16, 16, [220, 20, 20]) },
+        ]);
+
+        assert.equal(typeof result.text, 'string');
+        assert.ok(result.text.length > 0, 'a turn with an image must still produce something');
         await session.stop();
       },
     },
@@ -422,4 +444,40 @@ export function modelRunnerContract(): readonly ContractCase[] {
       },
     },
   ];
+}
+
+/**
+ * A PNG of one colour, built from nothing.
+ *
+ * Here rather than as a fixture file because the contract is a list of plain
+ * functions that has to run from a checkout with nothing else present — by a
+ * person, against the real provider — and forty lines of format are cheaper than
+ * a binary that has to travel with it.
+ */
+function solidPng(width: number, height: number, [r, g, b]: [number, number, number]): Uint8Array {
+  const row = Buffer.alloc(1 + width * 3);
+  for (let x = 0; x < width; x += 1) row.set([r, g, b], 1 + x * 3);
+  const pixels = Buffer.concat(Array.from({ length: height }, () => row));
+
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  // Eight bits per channel, truecolour, default compression, filter and no interlace.
+  header.set([8, 2, 0, 0, 0], 8);
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(pixels)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
 }

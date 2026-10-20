@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -75,6 +76,45 @@ describe('recording a turn', () => {
     expect(row?.adapter).toBe('fake');
     expect(row?.sessionId).toBe(session.id);
     expect(row?.instanceId).toBe(instanceId);
+  });
+
+  it('hands images to the turn, and records each by its hash rather than its bytes', async () => {
+    // The images are passed on, which is the half nothing would notice losing:
+    // the port's parameter is optional, so a wrapper that forgot it would still
+    // compile and every photo would silently stop at the audit.
+    const inner = fakeRunner({ text: ['a red square'] });
+    const runner = auditedRunner(inner, { writer, instanceId });
+    const session = await runner.start({
+      tier: 'balanced',
+      systemPrompt: 'Answer briefly.',
+      profile: TEST_PROFILE,
+    });
+    const data = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+
+    await session.turn('What is this?', [{ mediaType: 'image/jpeg', data }]);
+
+    expect(inner.turns[0]?.images).toEqual([{ mediaType: 'image/jpeg', data }]);
+    const [row] = rows();
+    expect(row?.prompt).toBe(
+      'What is this?\n[image sha256:' +
+        createHash('sha256').update(data).digest('hex') +
+        ' image/jpeg 7 bytes]',
+    );
+  });
+
+  it('passes images through a structured session too', async () => {
+    const inner = fakeRunner({ values: [{ verdict: 'yes' }] });
+    const runner = auditedRunner(inner, { writer, instanceId });
+    const session = await runner.startStructured(
+      { tier: 'balanced', systemPrompt: 'Answer.', profile: TEST_PROFILE },
+      ANSWER,
+    );
+    const data = Uint8Array.from([0x89, 0x50, 0x4e, 0x47]);
+
+    await session.turn('Is it a PNG?', [{ mediaType: 'image/png', data }]);
+
+    expect(inner.turns[0]?.images).toHaveLength(1);
+    expect(rows()[0]?.prompt).toContain('image/png 4 bytes]');
   });
 
   it('keeps the cache counters beside the cost', async () => {

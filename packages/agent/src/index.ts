@@ -1,4 +1,11 @@
-export type { Agent, AgentOptions, DecidedAction, Exchange } from './agent.ts';
+export type {
+  Agent,
+  AgentOptions,
+  DecidedAction,
+  Exchange,
+  Message,
+  SentImage,
+} from './agent.ts';
 export { createAgent } from './agent.ts';
 export type { Inspection, InspectionResult, InspectOptions } from './inspect.ts';
 export { inspect, inspection, MAX_CONTENT_BYTES } from './inspect.ts';

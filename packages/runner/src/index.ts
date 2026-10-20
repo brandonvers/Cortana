@@ -49,8 +49,9 @@ export type {
   SessionSpec,
   StructuredSession,
   StructuredTurnResult,
+  TurnImage,
   TurnResult,
   TurnUsage,
   UsageWindow,
 } from './port.ts';
-export { isModelTier, MODEL_TIERS } from './port.ts';
+export { isModelTier, MODEL_TIERS, TURN_IMAGE_TYPES } from './port.ts';

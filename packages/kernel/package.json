@@ -18,6 +18,7 @@
     "@cortana/channel": "workspace:*",
     "@cortana/config": "workspace:*",
     "@cortana/core": "workspace:*",
+    "@cortana/media": "workspace:*",
     "@cortana/policy": "workspace:*",
     "@cortana/runner": "workspace:*",
     "@cortana/storage": "workspace:*",

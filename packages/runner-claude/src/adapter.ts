@@ -24,6 +24,7 @@ import type {
   SessionSpec,
   StructuredSession,
   StructuredTurnResult,
+  TurnImage,
   TurnResult,
 } from '@cortana/runner';
 import type { ZodType } from 'zod';
@@ -182,10 +183,30 @@ class PromptQueue implements AsyncIterable<unknown> {
   #wake: (() => void) | null = null;
   #closed = false;
 
-  push(text: string): void {
+  /**
+   * One user message. With images it is a list of content blocks — the images
+   * first and the text after them, the order the provider's own guidance asks
+   * for — and without any it stays the plain string it always was, so a
+   * text-only turn reaches the provider exactly as before.
+   */
+  push(text: string, images: readonly TurnImage[] = []): void {
+    const content =
+      images.length === 0
+        ? text
+        : [
+            ...images.map((image) => ({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: image.mediaType,
+                data: Buffer.from(image.data).toString('base64'),
+              },
+            })),
+            { type: 'text', text },
+          ];
     this.#pending.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
     });
     this.#wake?.();
@@ -369,7 +390,10 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
       );
     };
 
-    const runTurn = async (prompt: string): Promise<{ result: ProviderResult }> => {
+    const runTurn = async (
+      prompt: string,
+      images: readonly TurnImage[] = [],
+    ): Promise<{ result: ProviderResult }> => {
       if (stopped) {
         throw new AppError('this session has stopped and will not take another turn', {
           category: 'provider',
@@ -378,7 +402,7 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
         });
       }
 
-      queue.push(prompt);
+      queue.push(prompt, images);
       const deadline = clock() + timeoutMs;
 
       for (;;) {
@@ -476,8 +500,8 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
           return session.stopped;
         },
         stop: () => session.stop(),
-        async turn(prompt: string): Promise<TurnResult> {
-          const { result } = await session.runTurn(prompt);
+        async turn(prompt: string, images: readonly TurnImage[] = []): Promise<TurnResult> {
+          const { result } = await session.runTurn(prompt, images);
           return {
             text: typeof result.result === 'string' ? result.result : '',
             usage: session.finish(result),
@@ -498,8 +522,11 @@ export async function createClaudeRunner(options: ClaudeRunnerOptions = {}): Pro
           return session.stopped;
         },
         stop: () => session.stop(),
-        async turn(prompt: string): Promise<StructuredTurnResult<Value>> {
-          const { result } = await session.runTurn(prompt);
+        async turn(
+          prompt: string,
+          images: readonly TurnImage[] = [],
+        ): Promise<StructuredTurnResult<Value>> {
+          const { result } = await session.runTurn(prompt, images);
           const usage = session.finish(result);
 
           // ADR-0015: the provider's enforcement is a strong prior, not a

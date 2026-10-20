@@ -26,6 +26,7 @@ import type {
   SessionSpec,
   StructuredSession,
   StructuredTurnResult,
+  TurnImage,
   TurnResult,
   TurnUsage,
 } from './port.ts';
@@ -63,6 +64,8 @@ export interface RecordedTurn {
   readonly session: string;
   readonly prompt: string;
   readonly structured: boolean;
+  /** What was handed to the turn beside its text. Empty for a text-only turn. */
+  readonly images: readonly TurnImage[];
 }
 
 export interface FakeScript {
@@ -194,9 +197,9 @@ export function fakeRunner(script: FakeScript = {}): FakeRunner {
           return base.stopped;
         },
         stop: () => base.stop(),
-        async turn(prompt: string): Promise<TurnResult> {
+        async turn(prompt: string, images: readonly TurnImage[] = []): Promise<TurnResult> {
           base.refuseIfStopped();
-          turns.push({ session: base.id, prompt, structured: false });
+          turns.push({ session: base.id, prompt, structured: false, images });
           return { text: nextText(), usage };
         },
       };
@@ -214,9 +217,12 @@ export function fakeRunner(script: FakeScript = {}): FakeRunner {
           return base.stopped;
         },
         stop: () => base.stop(),
-        async turn(prompt: string): Promise<StructuredTurnResult<Value>> {
+        async turn(
+          prompt: string,
+          images: readonly TurnImage[] = [],
+        ): Promise<StructuredTurnResult<Value>> {
           base.refuseIfStopped();
-          turns.push({ session: base.id, prompt, structured: true });
+          turns.push({ session: base.id, prompt, structured: true, images });
 
           const parsed = schema.safeParse(nextValue(prompt));
           if (!parsed.success) {

@@ -68,6 +68,16 @@ images beside the text; the adapter sends them as image blocks. The audit keeps
 each image's id and SHA-256, so what was said is recorded without the audit
 becoming a photo library.
 
+> **What the step found.** The provider sees what it is sent: a 16×16 red PNG
+> built by the contract and handed through the adapter came back "Piros" from
+> the real model. Two things would have failed silently. The port's images are
+> an optional parameter, so the audit's wrapper and the adapter both compiled
+> while dropping every photo — a test now pins each. And a photo is fetched
+> as soon as it arrives but used only when its turn comes, so a failed
+> download was an unhandled rejection, which the daemon answers by exiting;
+> each fetch now settles to a value. An album keeps its place in the queue
+> from its first photo, so a message sent after it is answered after it.
+
 **2. Not starting over.** The provider keeps a session it can resume, and the
 port starts carrying that: the agent's session is reopened with `resume` after
 a restart instead of fresh. Small, and first-hand: every merge to `main` is a
