@@ -363,10 +363,9 @@ describe('the cap on how many are awake', () => {
 
   it('refuses rather than interrupting agents that are all working', async () => {
     const runner = fakeRunner({ values: [answer('a'), answer('b')] });
-    let residents: Residents;
     const holding = new Map<string, () => void>();
 
-    residents = createResidents({
+    const residents: Residents = createResidents({
       roster,
       runner: {
         ...runner,

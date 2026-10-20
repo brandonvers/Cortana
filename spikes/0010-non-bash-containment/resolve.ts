@@ -159,7 +159,7 @@ async function main(): Promise<void> {
   rows.push(...userChannel());
 
   console.log('--- delivery ---');
-  console.log('channel'.padEnd(17) + 'key'.padEnd(27) + 'landed  source/origin');
+  console.log(`${'channel'.padEnd(17)}${'key'.padEnd(27)}landed  source/origin`);
   for (const r of rows) {
     const where = r.landed ? `${r.source ?? '?'}${r.origin ? `/${r.origin}` : ''}` : '';
     console.log(
