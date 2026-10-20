@@ -178,6 +178,9 @@ export function auditedRunner(runner: ModelRunner, options: AuditOptions): Model
         get stopped(): boolean {
           return session.stopped;
         },
+        get resumeToken(): string | null {
+          return session.resumeToken;
+        },
         stop: () => session.stop(),
         turn: (prompt, images = []) =>
           around(
@@ -203,6 +206,9 @@ export function auditedRunner(runner: ModelRunner, options: AuditOptions): Model
         tier: session.tier,
         get stopped(): boolean {
           return session.stopped;
+        },
+        get resumeToken(): string | null {
+          return session.resumeToken;
         },
         stop: () => session.stop(),
         turn: (prompt, images = []) =>

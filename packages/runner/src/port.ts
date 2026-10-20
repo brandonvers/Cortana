@@ -55,6 +55,18 @@ export interface SessionSpec {
    * for a scheduled job at four in the morning, and there may be nobody at all.
    */
   readonly approve?: Approve;
+  /**
+   * A token an earlier session of this runner gave out, to continue that
+   * conversation rather than start a new one.
+   *
+   * Opaque on purpose: what it is — a provider's session id, a file, a row — is
+   * the adapter's business, and a caller that read meaning into it would be a
+   * caller that depended on one provider. It is only ever handed back to the
+   * runner that issued it. If the runner can no longer continue it, the first
+   * turn fails in the `provider` category, and starting afresh is the caller's
+   * decision rather than something done behind its back.
+   */
+  readonly resume?: string;
 }
 
 /**
@@ -150,6 +162,14 @@ interface SessionBase {
   readonly id: SessionId;
   readonly tier: ModelTier;
   readonly stopped: boolean;
+  /**
+   * What to pass as `resume` to continue this conversation later, or `null`
+   * when there is nothing to continue yet or the runner cannot continue one.
+   *
+   * Read it after a turn: a provider may only say what its session is called
+   * once the session has started talking.
+   */
+  readonly resumeToken: string | null;
   /** Idempotent. A stopped session refuses further turns rather than restarting. */
   stop(): Promise<void>;
 }

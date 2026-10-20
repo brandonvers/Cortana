@@ -217,6 +217,32 @@ export function modelRunnerContract(): readonly ContractCase[] {
     },
 
     {
+      name: 'gives a session a token that continues it in another session',
+      async run(runner) {
+        const spec = {
+          tier: 'fast' as const,
+          systemPrompt: 'Answer briefly.',
+          profile: CONTRACT_PROFILE,
+        };
+        const first = await runner.start(spec);
+        await first.turn('Reply with a single word.');
+        const token = first.resumeToken;
+        await first.stop();
+
+        assert.equal(
+          typeof token,
+          'string',
+          'a session that has talked must say how to continue it',
+        );
+        const second = await runner.start({ ...spec, resume: token as string });
+        const result = await second.turn('Reply with a single word again.');
+
+        assert.ok(result.text.length > 0, 'a continued session must still answer');
+        await second.stop();
+      },
+    },
+
+    {
       name: 'reports usage that can be added up and explained',
       async run(runner) {
         const session = await runner.start({

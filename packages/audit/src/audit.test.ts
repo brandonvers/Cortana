@@ -117,6 +117,17 @@ describe('recording a turn', () => {
     expect(rows()[0]?.prompt).toContain('image/png 4 bytes]');
   });
 
+  it('passes on the token that continues a session', async () => {
+    // Required by the port, so a wrapper that forgot it would not compile — but
+    // a wrapper that answered null would, and every restart would start over.
+    const runner = auditedRunner(fakeRunner({ text: ['ok'] }), { writer, instanceId });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: TEST_PROFILE });
+
+    await session.turn('hello');
+
+    expect(session.resumeToken).toMatch(/^fake-/);
+  });
+
   it('keeps the cache counters beside the cost', async () => {
     // Spike 0009 measured an identical call costing $0.0201 and $0.6891 — 34× —
     // on cache state alone. A cost row without them invites an average, and the

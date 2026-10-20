@@ -104,6 +104,31 @@ describe('failures', () => {
   it('treats is_error as a failure even when the subtype looks fine', () => {
     expect(failureFrom({ subtype: 'success', is_error: true })).not.toBeNull();
   });
+
+  /** The result the provider sent, measured, for a session it never had. */
+  const lost = {
+    type: 'result',
+    subtype: 'error_during_execution',
+    is_error: true,
+    num_turns: 0,
+    total_cost_usd: 0,
+    errors: ['No conversation found with session ID: 00000000-0000-4000-8000-000000000000'],
+  };
+
+  it('says what the provider said when it put it in errors rather than result', () => {
+    const error = failureFrom({ ...lost, errors: ['The model is overloaded'] });
+
+    expect(error?.message).toContain('The model is overloaded');
+    expect(error?.code).toBe('turn-failed');
+  });
+
+  it('names a conversation the provider no longer has, and nothing else, as resume-failed', () => {
+    // Its own code because it is the one failure where starting afresh is the
+    // right answer. Every other failure has a conversation worth keeping.
+    expect(failureFrom(lost)?.code).toBe('resume-failed');
+    expect(failureFrom({ ...lost, errors: ['something else broke'] })?.code).toBe('turn-failed');
+    expect(failureFrom({ ...lost, errors: [] })?.code).toBe('turn-failed');
+  });
 });
 
 describe('account usage', () => {

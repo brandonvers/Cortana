@@ -16,6 +16,7 @@ export default defineConfig({
     '../audit/src/schema.ts',
     '../roster/src/schema.ts',
     '../reports/src/schema.ts',
+    '../kernel/src/schema.ts',
   ],
   out: './migrations',
 });

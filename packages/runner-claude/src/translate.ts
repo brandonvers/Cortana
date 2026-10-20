@@ -73,7 +73,21 @@ export interface ProviderResult {
   readonly usage?: Record<string, unknown>;
   readonly structured_output?: unknown;
   readonly num_turns?: unknown;
+  /** What went wrong, in the provider's words, when `result` carries none. */
+  readonly errors?: unknown;
 }
+
+/**
+ * The provider's sentence for a conversation it no longer has.
+ *
+ * Measured on 2026-10-20 by resuming a session id that never existed: the
+ * result is `error_during_execution`, `num_turns: 0`, no cost, and
+ * `errors: ["No conversation found with session ID: …"]`. The subtype alone is
+ * the same one many failures share, so this sentence is the only thing that
+ * tells a lost conversation from a broken turn — and it is matched here, in the
+ * one package allowed to know what the provider says, and nowhere else.
+ */
+const LOST_CONVERSATION = /^No conversation found with session ID/;
 
 const asCount = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
@@ -152,10 +166,32 @@ export function failureFrom(result: ProviderResult): AppError | null {
       'the provider gave up trying to produce a value matching the schema',
   };
 
+  // What the provider said, from `result` or, when that is empty, from
+  // `errors` — which is where it puts the reason for a turn that never ran.
+  const errors = Array.isArray(result.errors)
+    ? result.errors.filter((error): error is string => typeof error === 'string')
+    : [];
   // Trimmed and bounded. It is the provider's text and it goes in an error
   // message, a log line and an audit row; a runaway one would be all three.
-  const said = typeof result.result === 'string' ? result.result.trim().slice(0, 500) : '';
+  const said = (
+    typeof result.result === 'string' && result.result.trim() !== ''
+      ? result.result
+      : errors.join('; ')
+  )
+    .trim()
+    .slice(0, 500);
   const explanation = explanations[subtype];
+
+  if (errors.some((error) => LOST_CONVERSATION.test(error))) {
+    // Its own code, so a caller can start afresh on exactly this and on
+    // nothing else: a turn that failed for any other reason has a conversation
+    // worth keeping.
+    return new AppError(`the provider no longer has the conversation it was asked to continue`, {
+      category: 'provider',
+      code: 'resume-failed',
+      detail: { subtype, provider: said },
+    });
+  }
 
   // The provider's own words lead when it gave any, because they are the only
   // part of this that is about what actually happened. The subtype follows in
