@@ -246,9 +246,15 @@ knowing while using M4 rather than discovering afterwards.
   wakes eight agents will find out what that costs from their own account.
 - **Delegation is a new way for a profile to be wrong.** An agent that can
   delegate to one with a wider profile has, in effect, that wider profile. This
-  is the containment question M4 introduces and it does not have an answer yet —
-  whether a delegate's profile is intersected with its delegator's is a decision
-  step 5 has to make rather than inherit.
+  is the containment question M4 introduces.
+
+  > **Decided on 2026-10-20, by the owner: intersected.** A delegate works under
+  > the intersection of its own profile and its delegator's, so delegating never
+  > reaches past what the delegator could do itself. The cost is accepted: a
+  > task the delegator was not entitled to stalls rather than proceeds, and the
+  > stall goes up to the main agent, which decides — the same place any other
+  > blocker goes under ADR-0014. Step 5 implements this rather than choosing it,
+  > and a delegation that would widen a profile fails a test.
 - **The definition file format is an interface** the moment anybody writes one.
   Changing it later costs whatever people have written, so it is worth being
   narrow on the first pass and adding fields rather than removing them.
