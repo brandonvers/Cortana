@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/brandonvers/Cortana/compare/v0.1.0...v0.2.0) (2026-10-20)
+
+
+### Features
+
+* **channel:** `cortana`, a command that asks you rather than refusing for you ([#80](https://github.com/brandonvers/Cortana/issues/80)) ([245e673](https://github.com/brandonvers/Cortana/commit/245e673c1d159dbf924fc516166abbc79e1eabeb))
+
 ## [0.1.0](https://github.com/brandonvers/Cortana/compare/v0.0.1...v0.1.0) (2026-10-10)
 
 
