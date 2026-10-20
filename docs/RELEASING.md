@@ -147,11 +147,13 @@ which reads Conventional Commits on `main`.
 1. Work merges to `main` as usual.
 2. release-please opens or updates a **release pull request** with the version
    bump and the generated `CHANGELOG.md` entry.
-3. `release.yml` starts CI on it. GitHub starts no workflow for anything its own
-   token did, so the bot's pull request would otherwise never have a check, and
-   the ruleset on `main` would never let it merge. Its commit is signed off by
-   the bot (`signoff` in the configuration), and the DCO check runs on it like
-   any other.
+3. `release.yml` approves the CI run on it. GitHub creates that run but holds it
+   for approval, because the bot's own token made the push, and a run started
+   any other way is not counted towards the pull request's required checks —
+   so without the approval the release pull request never has a check, and the
+   ruleset on `main` never lets it merge. Its commit is signed off by the bot
+   (`signoff` in the configuration), and the DCO check runs on it like any
+   other.
 4. The maintainer reviews it. This is the checkpoint: a wrong commit type produces
    a wrong version bump, and this is where it gets caught.
 5. **The maintainer merges it, and nobody else does.** Merging creates the tag and
