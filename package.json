@@ -16,6 +16,7 @@
   },
   "packageManager": "pnpm@11.21.0",
   "scripts": {
+    "cortana": "node packages/channel/src/cortana.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",

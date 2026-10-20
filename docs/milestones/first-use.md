@@ -145,6 +145,16 @@ place `ProtectSystem=strict` leaves writable. The install notes in
 
 **4. `cortana`.** The client `talk.manual.ts` already is, as a command.
 
+> **What the step found.** Two things the manual script got right for a script
+> and wrong for a command. It refused every approval unless started with
+> `--approve`; at a terminal there is a person, so now the question is put to
+> them, and refused only when nobody is at the keyboard. And on the server it
+> could not have worked as anyone: the socket belongs to the service user, and
+> run as that user by hand it looked for the socket in the wrong place, because
+> systemd tells the service where its data lives and nothing tells a shell. So
+> the server gets a three-line wrapper that says it, and every refusal names the
+> wrapper rather than leaving a person to work out `sudo -u` on their own.
+
 **5. A week of use.** The owner's persona and anything domain-specific live in
 the owner's own configuration, not in this repository — the core knows no
 domain. What the week finds is recorded, and is what step 5 of M4 starts from.
