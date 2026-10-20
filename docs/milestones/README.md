@@ -16,6 +16,7 @@ is corrected in place and the correction says what changed.
 | M3 | Chat, conversation loop, approvals | [m3-conversation.md](m3-conversation.md) |
 | M4 | [The roster: residents, delegation, report aggregation](m4-the-roster.md) | paused after step 4 |
 | — | [First use: reachable from a phone](first-use.md) — between M4's steps 4 and 5 | in progress |
+| — | [Working material: photos, video, the web, notes](working-material.md) — after first use, before M4's step 5 | proposed |
 | M5 | Memory | not written — [blocked](../spikes/README.md#outstanding) |
 | M6 | Scheduler, durable jobs, budget governor | not written |
 | M7 | Dashboard, ops CLI, packaging | not written |

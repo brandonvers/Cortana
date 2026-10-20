@@ -128,6 +128,12 @@ work before delegation was designed. It builds nothing that belongs to a later
 milestone, and M4 resumes when it is done. A second exception would need the
 same: a plan saying why, and what it does not start.
 
+**A second one was made on 2026-10-20**, and has its plan:
+[working material](milestones/working-material.md) — photos in, files and a
+video out, notes, and web search — because using the system for real work
+found that what it could be given mattered more than who in a team would
+handle it. It starts nothing of M5 or M7, and M4 resumes at step 5 after it.
+
 ## 3. Tags
 
 Every release is an **annotated, signed** tag: `v0.1.0-alpha.1`.
