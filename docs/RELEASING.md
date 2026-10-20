@@ -153,7 +153,9 @@ which reads Conventional Commits on `main`.
    so without the approval the release pull request never has a check, and the
    ruleset on `main` never lets it merge. Its commit is signed off by the bot
    (`signoff` in the configuration), and the DCO check runs on it like any
-   other.
+   other. It is rebuilt on every push to `main` (`always-update`), not only
+   when the changelog changes: otherwise a `chore:` or `ci:` commit leaves it
+   behind `main`, and the ruleset refuses a branch that is not up to date.
 4. The maintainer reviews it. This is the checkpoint: a wrong commit type produces
    a wrong version bump, and this is where it gets caught.
 5. **The maintainer merges it, and nobody else does.** Merging creates the tag and
