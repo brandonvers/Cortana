@@ -1,10 +1,12 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { connect, socketPathFor } from '@cortana/channel';
 import { type Config, Secret } from '@cortana/config';
 import { AppError, isAppError } from '@cortana/core';
 import { recordingLogger } from '@cortana/core/testing';
+import { IMAGE_TYPES } from '@cortana/media';
+import { TURN_IMAGE_TYPES } from '@cortana/runner';
 import { fakeRunner } from '@cortana/runner/testing';
 import {
   createTelegramChannel,
@@ -75,15 +77,29 @@ function message(text: string) {
  * Telegram, played by the test. `getMe` answers with `reachable()` so a test can
  * make the network be down and come back.
  */
-function telegram(reachable: () => TelegramResponse | null = () => null) {
+function telegram(
+  reachable: () => TelegramResponse | null = () => null,
+  files: Readonly<Record<string, Uint8Array>> = {},
+) {
   const sent: string[] = [];
   let bot: TelegramChannel | null = null;
   const open = (options: TelegramOptions): TelegramChannel => {
     bot = createTelegramChannel({
       ...options,
       startTimeoutMs: 50,
+      albumWindowMs: 20,
+      // Telegram's file server: a file's bytes, by the path getFile gave.
+      download: async (filePath) => {
+        const data = files[filePath];
+        if (data === undefined) throw new Error(`no file at ${filePath}`);
+        return data;
+      },
       transport: (method, payload) => {
         if (method === 'getMe') return reachable() ?? { ok: true, result: BOT };
+        if (method === 'getFile') {
+          const id = String(payload['file_id']);
+          return { ok: true, result: { file_id: id, file_unique_id: id, file_path: id } };
+        }
         if (method === 'sendMessage') {
           sent.push(String(payload['text']));
           return {
@@ -180,6 +196,78 @@ describe('the bot, in the daemon', () => {
     kernel = null;
 
     expect(tg.bot.running).toBe(false);
+  });
+});
+
+function photoMessage(fileId: string) {
+  const update = nextUpdate++;
+  return {
+    update_id: update,
+    message: {
+      message_id: update,
+      date: 0,
+      chat: { id: OWNER, type: 'private', first_name: 'owner' },
+      from: { id: OWNER, is_bot: false, first_name: 'owner' },
+      photo: [{ file_id: fileId, file_unique_id: fileId, width: 1280, height: 960 }],
+      caption: 'Write a post about this job',
+    },
+  } as never;
+}
+
+/** A JPEG as far as anything that reads its first bytes is concerned. */
+const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70]);
+
+describe('a photo from the phone', () => {
+  it('is kept on the machine and shown to the agent, which is told what it is called', async () => {
+    const runner = fakeRunner({ values: [answer('A good post.')] });
+    const tg = telegram(() => null, { 'photo-1': JPEG });
+    kernel = await startKernel({
+      config,
+      logger: recordingLogger(),
+      version: '0.4.0',
+      openRunner: async () => runner,
+      readCredential: () => token(),
+      openTelegram: tg.open,
+    });
+
+    await tg.bot.receive(photoMessage('photo-1'));
+
+    await vi.waitFor(() => expect(tg.sent).toEqual(['A good post.']));
+    const [turn] = runner.turns;
+    expect(turn?.images).toHaveLength(1);
+    expect([...(turn?.images[0]?.data ?? [])]).toEqual([...JPEG]);
+    expect(turn?.prompt).toContain('Write a post about this job');
+    const held = readdirSync(join(config.dataDir, 'media'));
+    expect(held).toHaveLength(1);
+    expect(turn?.prompt).toContain(held[0]?.split('.')[0]);
+  });
+
+  it('is turned away in words when it is not an image at all, and costs no turn', async () => {
+    const runner = fakeRunner({ values: [] });
+    const tg = telegram(() => null, { 'not-a-photo': new TextEncoder().encode('<html>') });
+    kernel = await startKernel({
+      config,
+      logger: recordingLogger(),
+      version: '0.4.0',
+      openRunner: async () => runner,
+      readCredential: () => token(),
+      openTelegram: tg.open,
+    });
+
+    await tg.bot.receive(photoMessage('not-a-photo'));
+
+    await vi.waitFor(() => expect(tg.sent).toHaveLength(1));
+    expect(tg.sent[0]).toContain('not an image');
+    expect(runner.turns).toHaveLength(0);
+  });
+});
+
+describe('the image types', () => {
+  it('the store accepts are exactly the ones the port can carry', () => {
+    // `@cortana/runner` names the four types the provider takes and
+    // `@cortana/media` decides which bytes are which, and neither depends on
+    // the other. This is where they are held together.
+    expect([...IMAGE_TYPES]).toEqual([...TURN_IMAGE_TYPES]);
   });
 });
 

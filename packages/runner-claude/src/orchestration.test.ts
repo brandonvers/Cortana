@@ -192,6 +192,41 @@ describe('what the log is told about rate limits', () => {
   });
 });
 
+describe('a turn with images', () => {
+  /** The first user message the session sends, as the provider would read it. */
+  async function firstMessage(
+    images?: { mediaType: 'image/png'; data: Uint8Array }[],
+  ): Promise<{ content: unknown }> {
+    let prompt: AsyncIterable<unknown> | null = null;
+    const runner = await createClaudeRunner({
+      openConversation: (params) => {
+        prompt = (params as { prompt: AsyncIterable<unknown> }).prompt;
+        return answers(success('a red square'));
+      },
+    });
+    const session = await runner.start({ tier: 'fast', systemPrompt: 'a', profile: QUARANTINE });
+    await session.turn('What is this?', images);
+    const sent = await (prompt as unknown as AsyncIterable<unknown>)[Symbol.asyncIterator]().next();
+    await session.stop();
+    return (sent.value as { message: { content: unknown } }).message;
+  }
+
+  it('sends the images as image blocks, before the text', async () => {
+    const message = await firstMessage([
+      { mediaType: 'image/png', data: Uint8Array.from([1, 2, 3]) },
+    ]);
+
+    expect(message.content).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AQID' } },
+      { type: 'text', text: 'What is this?' },
+    ]);
+  });
+
+  it('sends a turn without images as the plain string it always was', async () => {
+    expect((await firstMessage()).content).toBe('What is this?');
+  });
+});
+
 describe('the profile, on its way to the provider', () => {
   /**
    * What `query` was actually called with.

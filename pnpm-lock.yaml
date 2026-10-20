@@ -124,6 +124,9 @@ importers:
       '@cortana/core':
         specifier: workspace:*
         version: link:../core
+      '@cortana/media':
+        specifier: workspace:*
+        version: link:../media
       '@cortana/policy':
         specifier: workspace:*
         version: link:../policy
@@ -142,6 +145,12 @@ importers:
       pino:
         specifier: ^10.4.0
         version: 10.4.0
+
+  packages/media:
+    dependencies:
+      '@cortana/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/policy:
     dependencies:

@@ -1,0 +1,17 @@
+{
+  "name": "@cortana/media",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The files the system holds — what it was sent and what it made — named by id, never by path.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@cortana/core": "workspace:*"
+  }
+}

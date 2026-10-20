@@ -25,6 +25,7 @@
  * only holds successes cannot answer the question anyone actually asks it.
  */
 
+import { createHash } from 'node:crypto';
 import {
   type Clock,
   type InstanceId,
@@ -41,6 +42,7 @@ import type {
   SessionSpec,
   StructuredSession,
   StructuredTurnResult,
+  TurnImage,
   TurnResult,
   TurnUsage,
 } from '@cortana/runner';
@@ -177,10 +179,15 @@ export function auditedRunner(runner: ModelRunner, options: AuditOptions): Model
           return session.stopped;
         },
         stop: () => session.stop(),
-        turn: (prompt) =>
+        turn: (prompt, images = []) =>
           around(
-            { sessionId: session.id as string, tier: session.tier, kind: 'prose', prompt },
-            () => session.turn(prompt),
+            {
+              sessionId: session.id as string,
+              tier: session.tier,
+              kind: 'prose',
+              prompt: withImages(prompt, images),
+            },
+            () => session.turn(prompt, images),
             (result) => result.text,
           ),
       };
@@ -198,10 +205,15 @@ export function auditedRunner(runner: ModelRunner, options: AuditOptions): Model
           return session.stopped;
         },
         stop: () => session.stop(),
-        turn: (prompt) =>
+        turn: (prompt, images = []) =>
           around<StructuredTurnResult<Value>>(
-            { sessionId: session.id as string, tier: session.tier, kind: 'structured', prompt },
-            () => session.turn(prompt),
+            {
+              sessionId: session.id as string,
+              tier: session.tier,
+              kind: 'structured',
+              prompt: withImages(prompt, images),
+            },
+            () => session.turn(prompt, images),
             // The value as JSON, so the record holds what the kernel acted on
             // rather than the prose the model happened to say alongside it.
             (result) => JSON.stringify(result.value),
@@ -215,3 +227,24 @@ export function auditedRunner(runner: ModelRunner, options: AuditOptions): Model
 
 /** Only exported so a caller without a daemon can still record. */
 export const anonymousInstance = (): InstanceId => newInstanceId();
+
+/**
+ * The prompt as it is recorded: the text, then one line per image.
+ *
+ * ADR-0019 says the audit stores what was said, and an image is something that
+ * was said. It is recorded by its SHA-256, type and size rather than by its
+ * bytes — the hash names exactly which picture the model was shown, the
+ * picture itself stays in the media store, and the audit does not become a
+ * photo library that outlives the store's own retention. The hash is computed
+ * here, from the bytes the provider is actually handed, rather than taken from
+ * whoever called: a record is worth what its source is.
+ */
+function withImages(prompt: string, images: readonly TurnImage[]): string {
+  if (images.length === 0) return prompt;
+  const lines = images.map(
+    (image) =>
+      `[image sha256:${createHash('sha256').update(image.data).digest('hex')} ` +
+      `${image.mediaType} ${image.data.length} bytes]`,
+  );
+  return `${prompt}\n${lines.join('\n')}`;
+}

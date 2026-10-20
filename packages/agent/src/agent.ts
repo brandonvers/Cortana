@@ -43,6 +43,7 @@ import type {
   ModelRunner,
   ModelTier,
   StructuredSession,
+  TurnImage,
   TurnUsage,
 } from '@cortana/runner';
 import { composePrompt } from './prompt.ts';
@@ -52,6 +53,24 @@ import { type AgentAnswer, agentAnswer, type ToolIntent } from './schema.ts';
 export interface DecidedAction {
   readonly intent: ToolIntent;
   readonly decision: Decision;
+}
+
+/**
+ * An image the person sent, as the agent is handed it: the bytes the model is
+ * shown, and the id the system holds it under.
+ *
+ * The id is what makes it usable after this turn. The model is told it, so a
+ * later turn — or a tool, from a later step — can refer to this picture by the
+ * name the store gave it, and never by a path.
+ */
+export interface SentImage extends TurnImage {
+  readonly id: string;
+}
+
+/** A message with something attached to it. */
+export interface Message {
+  readonly text: string;
+  readonly images: readonly SentImage[];
 }
 
 /** Everything one `say` produced. */
@@ -80,7 +99,7 @@ export interface Agent {
    * and cannot be. Passing it per turn is what lets a question reach the person
    * who caused it rather than the one who happened to be first.
    */
-  say(text: string, approve?: Approve): Promise<Exchange>;
+  say(message: string | Message, approve?: Approve): Promise<Exchange>;
   /** Idempotent, like the session it closes. */
   stop(): Promise<void>;
 }
@@ -221,7 +240,7 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
    */
   let tail: Promise<unknown> = Promise.resolve();
 
-  const runTurn = async (text: string, approve: Approve | undefined): Promise<Exchange> => {
+  const runTurn = async (message: Message, approve: Approve | undefined): Promise<Exchange> => {
     asking = approve ?? options.approve;
     if (session.stopped) {
       throw new AppError('this agent has stopped and will not take another turn', {
@@ -231,13 +250,14 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
       });
     }
 
+    const text = withImageList(message);
     const prompt = carried === null ? text : `${carried}\n\n${text}`;
     // Cleared before the turn rather than after it. A turn that throws has still
     // delivered the note, and carrying it into the retry as well would tell the
     // model twice about one refusal.
     carried = null;
 
-    const result = await session.turn(prompt);
+    const result = await session.turn(prompt, message.images);
 
     // Decided one at a time, and asked about one at a time. `decideForSession`
     // rather than `decide` because the profile's own answer to "should a person
@@ -282,10 +302,11 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
       return session.stopped;
     },
 
-    say(text: string, approve?: Approve): Promise<Exchange> {
+    say(input: string | Message, approve?: Approve): Promise<Exchange> {
+      const message = typeof input === 'string' ? { text: input, images: [] } : input;
       // Captured now and applied when the turn runs, not when it was asked for.
       // A queued turn belongs to whoever asked for it, however long it waited.
-      const next = tail.then(() => runTurn(text, approve));
+      const next = tail.then(() => runTurn(message, approve));
       // The queue must not break on a failed turn, so what is chained on is a
       // promise that settles rather than the one handed back. Without this, one
       // rejection would leave every later `say` rejecting with an error from a
@@ -298,4 +319,22 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
       return session.stop();
     },
   };
+}
+
+/**
+ * The text of a message, with the images that came with it named after it.
+ *
+ * The model sees the pictures themselves; what it cannot see is what the system
+ * calls them. Naming them here is what lets the next turn say "the second
+ * photo" in a way a tool can act on — the id — rather than a description that
+ * has to be matched back to a file by guesswork.
+ */
+function withImageList(message: Message): string {
+  if (message.images.length === 0) return message.text;
+  const list = message.images
+    .map((image, at) => `  ${at + 1}. ${image.id} (${image.mediaType})`)
+    .join('\n');
+  const sent = message.images.length === 1 ? 'one image' : `${message.images.length} images`;
+  const text = message.text.trim() === '' ? '(no text, only the images)' : message.text;
+  return `${text}\n\n[Sent with this message: ${sent}, held under these ids:\n${list}]`;
 }

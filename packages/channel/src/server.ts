@@ -73,7 +73,22 @@ export interface Conversation {
   ask(question: string, because: string): Promise<boolean>;
 }
 
-export type SayHandler = (text: string, conversation: Conversation) => Promise<string>;
+/**
+ * A picture that arrived with a message, before anything has said what it is.
+ *
+ * Bytes and nothing else. A channel knows how a picture travels; deciding what
+ * kind of file it is, keeping it, and naming it belong to whoever stores it, and
+ * a channel that did those would be a channel with an opinion about files.
+ */
+export interface IncomingImage {
+  readonly data: Uint8Array;
+}
+
+export type SayHandler = (
+  text: string,
+  conversation: Conversation,
+  images?: readonly IncomingImage[],
+) => Promise<string>;
 
 export interface ChannelOptions {
   readonly dataDir: string;
