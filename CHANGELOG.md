@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/brandonvers/Cortana/compare/v0.2.0...v0.3.0) (2026-10-20)
+
+
+### Features
+
+* **kernel:** the conversation survives a restart, and /new sets it aside ([#88](https://github.com/brandonvers/Cortana/issues/88)) ([acbea2a](https://github.com/brandonvers/Cortana/commit/acbea2ad89964582a3c98d051fb8d2a9bff6f28e))
+* **telegram:** photos reach the agent, kept on the machine and named by id ([#87](https://github.com/brandonvers/Cortana/issues/87)) ([81c2862](https://github.com/brandonvers/Cortana/commit/81c28627ff39ac558da59be3ab157daad4670778))
+
+
+### Documentation
+
+* a delegate works under the intersection of its profile and its delegator's ([#84](https://github.com/brandonvers/Cortana/issues/84)) ([51f1303](https://github.com/brandonvers/Cortana/commit/51f13039f69795424b435de550b2064a32e28906))
+* plan working material — photos in, video out, the web, and not starting over ([#86](https://github.com/brandonvers/Cortana/issues/86)) ([a5a1984](https://github.com/brandonvers/Cortana/commit/a5a198435c7607b6d68916e9b396d8e3401a9f23))
+
 ## [0.2.0](https://github.com/brandonvers/Cortana/compare/v0.1.0...v0.2.0) (2026-10-20)
 
 
