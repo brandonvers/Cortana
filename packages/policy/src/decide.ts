@@ -117,6 +117,33 @@ export function decideForSession(profile: Profile, request: ToolRequest): Decisi
 }
 
 /**
+ * Whether the kernel may do this for the session — an action rather than a tool.
+ *
+ * The same checks `decide` makes, against `actions` instead of `tools`. And the
+ * request is built by the kernel from what the action **declares** it touches,
+ * never from what the model said it would: a model that calls a write a read
+ * does not change what the write is.
+ */
+export function decideAction(profile: Profile, request: ToolRequest): Decision {
+  if (!(profile.actions ?? []).includes(request.tool)) {
+    return deny(`the ${profile.name} profile cannot ask for ${request.tool}`);
+  }
+  // Every other check is the tool's: network, paths, and what they deny. The
+  // name has passed the only list that differs.
+  return decide({ ...profile, tools: [request.tool] }, request);
+}
+
+/** `decideAction`, with the profile's confirmation policy applied — as a session would. */
+export function decideActionForSession(profile: Profile, request: ToolRequest): Decision {
+  const decision = decideAction(profile, request);
+  if (decision.verdict !== 'allow' || !needsConfirmation(profile)(request)) return decision;
+  return {
+    verdict: 'ask',
+    because: `${decision.because}, but this kind of action is confirmed before it runs`,
+  };
+}
+
+/**
  * The same decision, with anything the profile permits but an operator has asked
  * to be consulted about turned into a question.
  *

@@ -44,6 +44,7 @@ beforeEach(() => {
       persona: 'You are Cortana.',
       tier: 'balanced',
       tools: [],
+      actions: [],
       readable: [],
       writable: [],
       confirm: 'writes',

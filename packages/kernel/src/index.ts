@@ -1,3 +1,5 @@
+export type { ActionContext, ActionResult, KernelAction } from './actions.ts';
+export { MAX_ACTION_ROUNDS } from './actions.ts';
 export { TELEGRAM_TOKEN } from './conversation.ts';
 export type { CredentialSources, ReadCredential } from './credentials.ts';
 export { KEYCHAIN_SERVICE, machineCredentialSources, readCredential } from './credentials.ts';

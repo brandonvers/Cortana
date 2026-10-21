@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   decide,
+  decideAction,
+  decideActionForSession,
   decideForSession,
   decideWithConfirmation,
   isInside,
@@ -28,6 +30,50 @@ const WORKING: Profile = {
   sandbox: 'required',
   confirm: 'never',
 };
+
+describe('an action the kernel runs', () => {
+  const asking: Profile = {
+    ...WORKING,
+    network: 'denied',
+    actions: ['make_slideshow', 'remember'],
+  };
+
+  it('is allowed only when the profile lists it among its actions', () => {
+    expect(decideAction(asking, { tool: 'make_slideshow' }).verdict).toBe('allow');
+    expect(decideAction(asking, { tool: 'delete_everything' }).verdict).toBe('deny');
+  });
+
+  it('is not granted by naming it as a tool, nor does an action grant a tool', () => {
+    // Two vocabularies, two lists. A tool goes to the provider; an action never
+    // does. A name in one meaning something in the other is the failure here.
+    const toolOnly: Profile = { ...WORKING, tools: ['make_slideshow'] };
+    expect(decideAction(toolOnly, { tool: 'make_slideshow' }).verdict).toBe('deny');
+    expect(decide(asking, { tool: 'remember' }).verdict).toBe('deny');
+  });
+
+  it('is denied for no actions at all, which is every profile that names none', () => {
+    expect(decideAction(WORKING, { tool: 'make_slideshow' }).verdict).toBe('deny');
+    expect(decideAction(QUARANTINE, { tool: 'make_slideshow' }).verdict).toBe('deny');
+  });
+
+  it('meets the profile’s network rule like a tool would', () => {
+    expect(decideAction(asking, { tool: 'make_slideshow', network: true }).verdict).toBe('deny');
+  });
+
+  it('is put to a person when it writes and the profile confirms writes', () => {
+    const confirming: Profile = { ...asking, confirm: 'writes' };
+    expect(decideActionForSession(confirming, { tool: 'remember', writes: true }).verdict).toBe(
+      'ask',
+    );
+    expect(decideActionForSession(confirming, { tool: 'make_slideshow' }).verdict).toBe('allow');
+  });
+
+  it('is listed by a working profile when it is asked for, and by nothing else', () => {
+    expect(workingProfile({ name: 'main', actions: ['remember'] }).actions).toEqual(['remember']);
+    expect(workingProfile({ name: 'main' }).actions).toEqual([]);
+    expect(QUARANTINE.actions ?? []).toEqual([]);
+  });
+});
 
 describe('containment is by segment, not by prefix', () => {
   it('accepts a path inside a root', () => {

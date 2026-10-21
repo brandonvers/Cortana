@@ -117,6 +117,7 @@ function defaults(env: Env): Tree {
       persona: 'You are Cortana, a careful assistant running on this machine.',
       tier: 'balanced',
       tools: [],
+      actions: [],
       readable: [],
       writable: [],
       confirm: 'writes',

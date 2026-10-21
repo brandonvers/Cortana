@@ -125,6 +125,15 @@ as decided at the start. Captions go to
 `ffmpeg` through files rather than through its argument string, so no caption
 text is ever parsed as a filter.
 
+> **What the step found, first half.** Actions got their own list in a
+> profile, apart from `tools`: a tool is the provider's vocabulary and becomes
+> its allowlist, and an action is this project's and never reaches the
+> provider. A name in one grants nothing in the other, both ways, and a test
+> holds each direction. An action is decided on what it declares it touches,
+> so a model that calls a write a read changes nothing. One mutation survived
+> the first run: an action handed the raw input instead of what its schema
+> accepted would have seen a field the model slipped in. It is pinned.
+
 **5. Notes.** `remember` and `forget` are tools; notes live in the database and
 are composed into the agent's prompt at every wake. Writing one is a write, so
 under `confirm = "writes"` it is **put to the owner** — on the phone, as two

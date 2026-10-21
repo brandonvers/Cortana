@@ -37,7 +37,13 @@
  */
 
 import { AppError, type Logger, type SessionId } from '@cortana/core';
-import { type Decision, decideForSession, type Profile, type ToolRequest } from '@cortana/policy';
+import {
+  type Decision,
+  decideActionForSession,
+  decideForSession,
+  type Profile,
+  type ToolRequest,
+} from '@cortana/policy';
 import type {
   Approve,
   ModelRunner,
@@ -46,7 +52,7 @@ import type {
   TurnImage,
   TurnUsage,
 } from '@cortana/runner';
-import { composePrompt } from './prompt.ts';
+import { type ActionDescription, composePrompt } from './prompt.ts';
 import { type AgentAnswer, agentAnswer, type ToolIntent } from './schema.ts';
 
 /** One declared action and what the policy engine said about it. */
@@ -129,6 +135,11 @@ export interface AgentOptions {
    */
   readonly resume?: string;
   /**
+   * The actions the kernel runs, described for the prompt and declared for the
+   * decision. This package decides an intent that names one; it runs none.
+   */
+  readonly actions?: readonly ActionDescription[];
+  /**
    * How a call the profile will not decide alone is put to a person.
    *
    * Passed to the session as well as used here, so that **both** paths reach the
@@ -203,7 +214,11 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
   const session: StructuredSession<AgentAnswer> = await runner.startStructured(
     {
       tier,
-      systemPrompt: composePrompt({ persona: options.persona, profile }),
+      systemPrompt: composePrompt({
+        persona: options.persona,
+        profile,
+        ...(options.actions === undefined ? {} : { actions: options.actions }),
+      }),
       profile,
       // Always supplied, and not conditional on there being anybody: with
       // nobody, `asking` is undefined and this refuses. Passing no approver at
@@ -279,8 +294,17 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
     // not a mistake visible from outside.
     const actions: DecidedAction[] = [];
     for (const intent of result.value.actions) {
-      const request = asRequest(intent);
-      const decision = decideForSession(profile, request);
+      // An action the kernel runs is decided on what the action declares it
+      // touches. Anything else is decided as M3 decided every intent.
+      const action = (options.actions ?? []).find((known) => known.name === intent.tool);
+      const request =
+        action === undefined
+          ? asRequest(intent)
+          : { tool: action.name, writes: action.writes, network: action.network };
+      const decision =
+        action === undefined
+          ? decideForSession(profile, request)
+          : decideActionForSession(profile, request);
       actions.push({ intent, decision: await settle(request, decision) });
     }
 
