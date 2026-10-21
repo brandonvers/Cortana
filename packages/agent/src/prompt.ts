@@ -24,9 +24,9 @@
 
 import type { Profile } from '@cortana/policy';
 
-/** How the answer's two fields are explained to the model. */
+/** How the answer's three fields are explained to the model. */
 const SHAPE = [
-  'Answer with two things.',
+  'Answer with three things.',
   '',
   '"reply" is your message to the person. Write it as you would speak it, and put',
   'nothing in it that the kernel is meant to act on — it is read, not parsed.',
@@ -35,6 +35,10 @@ const SHAPE = [
   'empty, and an empty list is a complete answer. Do not invent an action to fill',
   'it, and do not describe an action in "reply" instead of listing it here: an',
   'action that is only described is an action nobody decided on.',
+  '',
+  '"attachments" is files to send with your reply: ids the system gave you, for',
+  'images the person sent or files made for them, copied exactly. It is usually',
+  'empty. An id you did not see written down is not a file, and is not sent.',
 ].join('\n');
 
 const list = (items: readonly string[]): string =>

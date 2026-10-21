@@ -6,6 +6,7 @@ export type {
 } from './bot.ts';
 export {
   createTelegramChannel,
+  FILE_NOT_SENT,
   FORWARDED_REFUSAL,
   NOT_PASSED_ON,
   PHOTO_NOT_FETCHED,

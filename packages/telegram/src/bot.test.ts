@@ -6,6 +6,7 @@ import type { Update, UserFromGetMe } from 'grammy/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createTelegramChannel,
+  FILE_NOT_SENT,
   FORWARDED_REFUSAL,
   NOT_PASSED_ON,
   PHOTO_NOT_FETCHED,
@@ -382,6 +383,59 @@ describe('an album', () => {
 
     await vi.waitFor(() => expect(order).toHaveLength(2));
     expect(order).toEqual(['album of 2', 'and one more thing']);
+  });
+});
+
+describe('an answer with files', () => {
+  const file = (id: string, mediaType: string) => ({
+    id,
+    mediaType,
+    data: Uint8Array.from([1, 2]),
+  });
+
+  it('sends the text, then each file the way its type is sent', async () => {
+    const { channel, of, texts } = harness(async () => ({
+      text: 'Here they are.',
+      files: [
+        file('aaaaaaaaaaaaaaaa', 'image/jpeg'),
+        file('bbbbbbbbbbbbbbbb', 'video/mp4'),
+        file('cccccccccccccccc', 'application/pdf'),
+      ],
+    }));
+
+    await channel.receive(message(OWNER, 'send me the files'));
+
+    await vi.waitFor(() => expect(of('sendDocument')).toHaveLength(1));
+    expect(texts()).toEqual(['Here they are.']);
+    expect(of('sendPhoto')).toHaveLength(1);
+    expect(of('sendVideo')).toHaveLength(1);
+    expect(of('sendPhoto')[0]?.payload['chat_id']).toBe(OWNER);
+  });
+
+  it('says which file did not go, and still sends the rest', async () => {
+    const calls: string[] = [];
+    const sent: unknown[] = [];
+    const { channel } = harness(
+      async () => ({
+        text: 'Two photos.',
+        files: [file('aaaaaaaaaaaaaaaa', 'image/jpeg'), file('bbbbbbbbbbbbbbbb', 'image/jpeg')],
+      }),
+      {
+        transport: (method, payload) => {
+          calls.push(method);
+          if (method === 'sendMessage') sent.push(payload['text']);
+          if (method === 'sendPhoto' && calls.filter((m) => m === 'sendPhoto').length === 1) {
+            return { ok: false, error_code: 400, description: 'Bad Request: photo too big' };
+          }
+          return ok({ message_id: 1, date: 0, chat: { id: payload['chat_id'], type: 'private' } });
+        },
+      },
+    );
+
+    await channel.receive(message(OWNER, 'send them'));
+
+    await vi.waitFor(() => expect(calls.filter((m) => m === 'sendPhoto')).toHaveLength(2));
+    expect(sent).toContain(`${FILE_NOT_SENT} (aaaaaaaaaaaaaaaa)`);
   });
 });
 

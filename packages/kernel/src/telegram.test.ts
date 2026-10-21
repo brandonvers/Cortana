@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -82,6 +83,8 @@ function telegram(
   files: Readonly<Record<string, Uint8Array>> = {},
 ) {
   const sent: string[] = [];
+  /** Every other method called, so a test can see a photo go out. */
+  const methods: string[] = [];
   let bot: TelegramChannel | null = null;
   const open = (options: TelegramOptions): TelegramChannel => {
     bot = createTelegramChannel({
@@ -107,6 +110,13 @@ function telegram(
             result: { message_id: sent.length, date: 0, chat: { id: OWNER, type: 'private' } },
           };
         }
+        methods.push(method);
+        if (method === 'sendPhoto' || method === 'sendVideo' || method === 'sendDocument') {
+          return {
+            ok: true,
+            result: { message_id: 0, date: 0, chat: { id: OWNER, type: 'private' } },
+          };
+        }
         return { ok: true, result: true };
       },
     });
@@ -115,6 +125,7 @@ function telegram(
   return {
     open,
     sent,
+    methods,
     get bot(): TelegramChannel {
       if (bot === null) throw new Error('the bot was never opened');
       return bot;
@@ -240,6 +251,37 @@ describe('a photo from the phone', () => {
     const held = readdirSync(join(config.dataDir, 'media'));
     expect(held).toHaveLength(1);
     expect(turn?.prompt).toContain(held[0]?.split('.')[0]);
+  });
+
+  it('can be sent back by the id it is held under, and an invented id sends nothing', async () => {
+    const id = createHash('sha256').update(JPEG).digest('hex').slice(0, 16);
+    const runner = fakeRunner({
+      values: [
+        answer('Got it.'),
+        { reply: 'This one for the cover.', actions: [], attachments: [id] },
+        { reply: 'And this one.', actions: [], attachments: ['ffffffffffffffff'] },
+      ],
+    });
+    const tg = telegram(() => null, { 'photo-1': JPEG });
+    kernel = await startKernel({
+      config,
+      logger: recordingLogger(),
+      version: '0.4.0',
+      openRunner: async () => runner,
+      readCredential: () => token(),
+      openTelegram: tg.open,
+    });
+
+    await tg.bot.receive(photoMessage('photo-1'));
+    await vi.waitFor(() => expect(tg.sent).toEqual(['Got it.']));
+    await tg.bot.receive(message('which should be the cover?'));
+    await vi.waitFor(() => expect(tg.methods).toContain('sendPhoto'));
+    expect(tg.sent[1]).toBe('This one for the cover.');
+
+    await tg.bot.receive(message('and another?'));
+    await vi.waitFor(() => expect(tg.sent).toHaveLength(3));
+    expect(tg.sent[2]).toContain('the system holds no file called ffffffffffffffff');
+    expect(tg.methods.filter((method) => method === 'sendPhoto')).toHaveLength(1);
   });
 
   it('is turned away in words when it is not an image at all, and costs no turn', async () => {

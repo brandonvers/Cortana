@@ -78,6 +78,8 @@ export interface Exchange {
   /** What the person reads. */
   readonly reply: string;
   readonly actions: readonly DecidedAction[];
+  /** Ids the agent asked to send with the reply. Unchecked here: the store is what knows. */
+  readonly attachments: readonly string[];
   readonly usage: TurnUsage;
 }
 
@@ -303,7 +305,12 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
       });
     }
 
-    return { reply: result.value.reply, actions, usage: result.usage };
+    return {
+      reply: result.value.reply,
+      actions,
+      attachments: result.value.attachments,
+      usage: result.usage,
+    };
   };
 
   return {

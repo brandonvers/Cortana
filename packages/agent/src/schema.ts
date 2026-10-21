@@ -86,6 +86,21 @@ export const agentAnswer = z.object({
       'What you want the kernel to do on your behalf. ' +
         'An empty list is the ordinary answer; never invent one to fill this field.',
     ),
+  /**
+   * Files to send with the reply, by the ids the system gave them.
+   *
+   * Ids and never paths, for the reason the media store gives: a path a model
+   * chose is a path someone can talk it into. An id the store does not hold is
+   * not sent, and the person is told. Defaulted, so an answer that leaves it
+   * out — and every scripted answer written before it existed — means none.
+   */
+  attachments: z
+    .array(z.string().min(1))
+    .default([])
+    .describe(
+      'Ids of files you were given — exactly as written — to send with the reply. ' +
+        'An empty list is the ordinary answer; never invent or guess an id.',
+    ),
 });
 
 export type AgentAnswer = z.infer<typeof agentAnswer>;
