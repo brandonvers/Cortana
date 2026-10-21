@@ -31,8 +31,10 @@ import {
   probeThisMachine,
   type RunningKernel,
   readCredential,
+  slideshowAction,
   startKernel,
 } from '@cortana/kernel';
+import { findToolkit } from '@cortana/media';
 import { createClaudeRunner } from '@cortana/runner-claude';
 import { EXIT, type ExitCode } from './exit.ts';
 import { type EarlySignals, type SignalWatch, watchForStop } from './signals.ts';
@@ -185,6 +187,13 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<ExitCode> 
 
     const probes = probeThisMachine(existsSync, env);
     announceSecretProtection(logger, probes);
+    // Found once, and said, so that a machine that cannot make a video says so
+    // at boot rather than in the middle of someone asking for one.
+    const toolkit = findToolkit(env);
+    logger.info('what this machine can make videos with', {
+      ffmpeg: toolkit.ffmpeg ?? '(none that can draw captions)',
+      font: toolkit.font ?? '(none)',
+    });
     // The rung announced above is the rung read from: the same detection, so
     // what the log says protects a credential is what is used to fetch it.
     const credentials = machineCredentialSources(
@@ -207,6 +216,10 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<ExitCode> 
       // can still do without one.
       openRunner: () => createClaudeRunner({ logger }),
       readCredential: (name) => readCredential(name, credentials),
+      // What the kernel can do for the agent. Offered only if the
+      // configuration names them; listed here so the daemon is where "which
+      // actions exist" is answered, as it is for "which provider".
+      actions: [slideshowAction(toolkit)],
     });
   } catch (error) {
     watch?.dispose();

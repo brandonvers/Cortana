@@ -41,24 +41,52 @@ export type ImageType = (typeof IMAGE_TYPES)[number];
  */
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-const EXTENSION: Readonly<Record<ImageType, string>> = {
+/** A video the system made. Only ever made here, never accepted from outside. */
+export const VIDEO_TYPE = 'video/mp4';
+export type MediaType = ImageType | typeof VIDEO_TYPE;
+
+/**
+ * The largest video kept, in bytes: what a Telegram bot may upload. A video
+ * the store held and no channel could deliver would be a file made for nobody.
+ */
+export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+
+const EXTENSION: Readonly<Record<MediaType, string>> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
   'image/gif': 'gif',
+  'video/mp4': 'mp4',
 };
+const TYPES = Object.keys(EXTENSION) as MediaType[];
 
 /** What a held file is, without its bytes. */
 export interface StoredMedia {
   readonly id: string;
   readonly sha256: string;
-  readonly mediaType: ImageType;
+  readonly mediaType: MediaType;
   readonly bytes: number;
+}
+
+/** A held image — what `put` accepts, and the only kind a model can be shown. */
+export interface StoredImage extends StoredMedia {
+  readonly mediaType: ImageType;
 }
 
 export interface MediaStore {
   /** Keeps an image and says what it is. The same bytes twice are one file. */
-  put(data: Uint8Array): StoredMedia;
+  put(data: Uint8Array): StoredImage;
+  /**
+   * Keeps a video the system made. Separate from `put` so that nothing arriving
+   * from outside — where only images are accepted — can be kept as a video.
+   */
+  putVideo(data: Uint8Array): StoredMedia;
+  /**
+   * Where a held file is on this machine, for system code handing it to a
+   * program such as `ffmpeg`. Never shown to a model: a model names files by
+   * id, and this is the one place an id becomes a path.
+   */
+  localPath(id: string): string | null;
   /** What the store holds under `id`, or `null` — never a guess. */
   get(id: string): StoredMedia | null;
   /** The bytes of a held file. Throws for an id the store does not hold. */
@@ -90,9 +118,9 @@ export function createMediaStore(options: { readonly dir: string }): MediaStore 
   const dir = options.dir;
   mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-  const locate = (id: string): { path: string; mediaType: ImageType } | null => {
+  const locate = (id: string): { path: string; mediaType: MediaType } | null => {
     if (!ID.test(id)) return null;
-    for (const mediaType of IMAGE_TYPES) {
+    for (const mediaType of TYPES) {
       const path = join(dir, `${id}.${EXTENSION[mediaType]}`);
       try {
         statSync(path);
@@ -104,9 +132,20 @@ export function createMediaStore(options: { readonly dir: string }): MediaStore 
     return null;
   };
 
-  const describe = (data: Uint8Array, mediaType: ImageType): StoredMedia => {
+  const describe = <Type extends MediaType>(data: Uint8Array, mediaType: Type) => {
     const sha256 = createHash('sha256').update(data).digest('hex');
     return { id: sha256.slice(0, 16), sha256, mediaType, bytes: data.length };
+  };
+
+  const keep = (data: Uint8Array, mediaType: MediaType): void => {
+    const id = describe(data, mediaType).id;
+    if (locate(id) !== null) return;
+    // Written beside its final name and renamed, so a reader never finds a
+    // half-written file under a valid id.
+    const final = join(dir, `${id}.${EXTENSION[mediaType]}`);
+    const partial = `${final}.${randomBytes(4).toString('hex')}.partial`;
+    writeFileSync(partial, data, { mode: 0o600 });
+    renameSync(partial, final);
   };
 
   return {
@@ -125,16 +164,32 @@ export function createMediaStore(options: { readonly dir: string }): MediaStore 
           { category: 'contract', code: 'media-too-large', detail: { bytes: data.length } },
         );
       }
-      const media = describe(data, mediaType);
-      if (locate(media.id) === null) {
-        // Written beside its final name and renamed, so a reader never finds a
-        // half-written photo under a valid id.
-        const final = join(dir, `${media.id}.${EXTENSION[mediaType]}`);
-        const partial = `${final}.${randomBytes(4).toString('hex')}.partial`;
-        writeFileSync(partial, data, { mode: 0o600 });
-        renameSync(partial, final);
+      keep(data, mediaType);
+      return describe(data, mediaType);
+    },
+
+    putVideo(data) {
+      // An MP4 says so four bytes in: a box called `ftyp`.
+      const isMp4 = data[4] === 0x66 && data[5] === 0x74 && data[6] === 0x79 && data[7] === 0x70;
+      if (!isMp4) {
+        throw new AppError('this is not an MP4 video', {
+          category: 'contract',
+          code: 'media-not-a-video',
+          detail: { bytes: data.length },
+        });
       }
-      return media;
+      if (data.length > MAX_VIDEO_BYTES) {
+        throw new AppError(
+          `the video is ${Math.ceil(data.length / 1024 / 1024)} MB, over the 50 MB a bot can send`,
+          { category: 'contract', code: 'media-too-large', detail: { bytes: data.length } },
+        );
+      }
+      keep(data, VIDEO_TYPE);
+      return describe(data, VIDEO_TYPE);
+    },
+
+    localPath(id) {
+      return locate(id)?.path ?? null;
     },
 
     get(id) {
