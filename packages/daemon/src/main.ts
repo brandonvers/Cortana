@@ -47,9 +47,21 @@ export interface DaemonOptions {
   readonly destination?: NodeJS.WritableStream;
 }
 
-function readVersion(): string {
+/**
+ * The release this process belongs to, from the repository's own manifest.
+ *
+ * Not this package's: release-please versions the product, in the root
+ * `package.json`, and leaves the workspace packages at `0.0.0`. Reading this
+ * package's manifest reported `0.0.0` from a server running 0.2.0, into every
+ * log line and every instance row — the record that exists so "which build did
+ * that" has an answer.
+ */
+export function readVersion(): string {
   try {
-    const manifest = readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8');
+    const manifest = readFileSync(
+      join(import.meta.dirname, '..', '..', '..', 'package.json'),
+      'utf8',
+    );
     return (JSON.parse(manifest) as { version?: string }).version ?? '0.0.0';
   } catch {
     return '0.0.0';
