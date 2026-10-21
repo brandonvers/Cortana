@@ -36,8 +36,9 @@
  * this file only knows there is a port.
  */
 
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { type Agent, createAgent, type SentImage } from '@cortana/agent';
+import { type Agent, composePrompt, createAgent, type SentImage } from '@cortana/agent';
 import { auditedRunner } from '@cortana/audit';
 import {
   approvalThrough,
@@ -153,6 +154,20 @@ export function conversationComponents(options: ConversationOptions): Conversati
     confirm: options.config.agent.confirm,
   });
 
+  /**
+   * What the agent is told before anything is said, as a digest — the same
+   * prompt `createAgent` composes, from the same parts.
+   */
+  const instructions = createHash('sha256')
+    .update(
+      composePrompt({
+        persona: options.config.agent.persona,
+        profile,
+        actions: offered.map((name) => registered.get(name) as KernelAction),
+      }),
+    )
+    .digest('hex');
+
   let agent: Agent | null = null;
   let channel: Channel | null = null;
   /** So a broken provider is reported once rather than on every message. */
@@ -176,16 +191,20 @@ export function conversationComponents(options: ConversationOptions): Conversati
   let continuing = false;
   let runnerName: string | null = null;
 
-  const savedConversation = (): { runner: string; resume: string } | null =>
+  const savedConversation = (): { runner: string; resume: string; prompt: string | null } | null =>
     options.storage.db
-      .select({ runner: agentSessions.runner, resume: agentSessions.resume })
+      .select({
+        runner: agentSessions.runner,
+        resume: agentSessions.resume,
+        prompt: agentSessions.prompt,
+      })
       .from(agentSessions)
       .where(eq(agentSessions.agent, MAIN))
       .get() ?? null;
 
   const saveConversation = async (resume: string, runner: string): Promise<void> => {
     await options.writer.write('remember where the conversation is', ({ db }) => {
-      const row = { agent: MAIN, runner, resume, updatedAt: Date.now() };
+      const row = { agent: MAIN, runner, resume, prompt: instructions, updatedAt: Date.now() };
       db.insert(agentSessions)
         .values(row)
         .onConflictDoUpdate({ target: agentSessions.agent, set: row })
@@ -226,10 +245,23 @@ export function conversationComponents(options: ConversationOptions): Conversati
         instanceId: options.instanceId,
         logger: log,
       });
-      // Carried on from the last process, when the same runner left a token.
-      // A token from another runner names nothing it could continue.
+      // Carried on from the last process, when the same runner left a token
+      // under the same instructions. A token from another runner names nothing
+      // it could continue; and a resumed session keeps the system prompt it was
+      // opened with, so continuing under changed instructions would carry on
+      // with the old ones — measured, and the reason a new persona or a new
+      // action once went unseen.
       const saved = savedConversation();
-      const resume = saved !== null && saved.runner === runner.name ? saved.resume : undefined;
+      const resume =
+        saved !== null && saved.runner === runner.name && saved.prompt === instructions
+          ? saved.resume
+          : undefined;
+      if (saved !== null && resume === undefined) {
+        log.info('a new conversation is begun rather than the saved one continued', {
+          because:
+            saved.runner !== runner.name ? 'another runner left it' : 'the instructions changed',
+        });
+      }
       const started = await createAgent({
         runner,
         profile,
@@ -380,7 +412,11 @@ export function conversationComponents(options: ConversationOptions): Conversati
       const token = talking.resumeToken;
       if (token !== null && runnerName !== null) {
         const saved = savedConversation();
-        if (saved?.resume !== token || saved.runner !== runnerName) {
+        if (
+          saved?.resume !== token ||
+          saved.runner !== runnerName ||
+          saved.prompt !== instructions
+        ) {
           await saveConversation(token, runnerName);
         }
       }

@@ -20,6 +20,16 @@ export const agentSessions = sqliteTable('agent_sessions', {
   runner: text('runner').notNull(),
   /** The runner's token, opaque here. */
   resume: text('resume').notNull(),
+  /**
+   * The SHA-256 of the system prompt the conversation was opened with.
+   *
+   * Measured on 2026-10-21: a resumed session keeps the system prompt it was
+   * first opened with, and the one it is resumed with is not read. So a
+   * conversation is continued only under the same instructions; when the
+   * persona or the actions change, a new one is begun. Null for a row written
+   * before this column, which is never continued.
+   */
+  prompt: text('prompt'),
   /** Epoch milliseconds. */
   updatedAt: integer('updated_at').notNull(),
 });
