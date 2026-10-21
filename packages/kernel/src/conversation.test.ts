@@ -208,10 +208,10 @@ describe('what a conversation leaves behind', () => {
 
 describe('a conversation across restarts', () => {
   /** A daemon on the same data directory, as a deploy leaves it. */
-  const restartWith = async (runner: FakeRunner) => {
+  const restartWith = async (runner: FakeRunner, persona = config.agent.persona) => {
     await kernel?.stop('deploy');
     kernel = await startKernel({
-      config,
+      config: { ...config, agent: { ...config.agent, persona } },
       logger: recordingLogger(),
       version: '0.3.0',
       openRunner: async () => runner,
@@ -232,6 +232,33 @@ describe('a conversation across restarts', () => {
     expect(await say('who am I?')).toBe('you are Brendon');
 
     expect(second.opened[0]?.resume).toBe(token);
+  });
+
+  it('begins a new conversation when the instructions changed', async () => {
+    // A resumed session keeps the system prompt it was opened with — measured
+    // — so continuing it under a new persona would carry on with the old one.
+    await start([answer('hello')]);
+    await say('hello');
+
+    const second = fakeRunner({ values: [answer('hi, with new instructions')] });
+    await restartWith(second, 'You are Cortana, and you can now make videos.');
+    await say('hello again');
+
+    expect(second.opened[0]?.resume).toBeUndefined();
+  });
+
+  it('never continues a conversation saved before its instructions were recorded', async () => {
+    await start([answer('hello')]);
+    await say('hello');
+    await kernel?.writer.write('an older row', ({ db }) => {
+      db.update(agentSessions).set({ prompt: null }).run();
+    });
+
+    const second = fakeRunner({ values: [answer('a fresh start')] });
+    await restartWith(second);
+    await say('hello again');
+
+    expect(second.opened[0]?.resume).toBeUndefined();
   });
 
   it('starts afresh when the conversation is gone, and the message still gets its answer', async () => {
