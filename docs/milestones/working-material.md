@@ -105,6 +105,15 @@ store. The Telegram channel sends them as photos, videos or documents; the
 socket prints where they are. An id the store does not hold is refused, which
 is the whole containment — there is no path for the model to name.
 
+> **What the step found.** The schema the provider accepts gained a field
+> without breaking anything already written, because it is defaulted: an
+> answer without `attachments` means none, and the provider is still asked for
+> one every turn. Against the real model, two images and then "send me back
+> only the blue one" came back with exactly the blue one's id, and the turn
+> before it — which asked for nothing — with none. An id the store does not
+> hold sends nothing and says so in the reply, and a file Telegram refuses is
+> named without stopping the ones after it.
+
 **4. Actions that run, and the first one.** Until now the agent's `actions` are
 decided and dropped. Here the kernel gets a small registry of tools — a name, a
 schema for its input, what it touches, and the function that does it — and

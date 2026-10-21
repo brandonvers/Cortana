@@ -156,6 +156,22 @@ describe('a turn', () => {
     expect(runner.turns[0]?.images).toEqual([]);
   });
 
+  it('hands back the files the agent asked to send, by id', async () => {
+    const agent = await agentOver([
+      { reply: 'Here is the cover.', actions: [], attachments: ['0123456789abcdef'] },
+    ]);
+
+    const exchange = await agent.say('Which photo should be the cover?');
+
+    expect(exchange.attachments).toEqual(['0123456789abcdef']);
+  });
+
+  it('reads an answer that names no files as naming none', async () => {
+    const agent = await agentOver([answer('ok')]);
+
+    expect((await agent.say('hello')).attachments).toEqual([]);
+  });
+
   it('reports what a turn cost, so the audit and the governor see the same number', async () => {
     const agent = await agentOver([answer('ok')]);
 

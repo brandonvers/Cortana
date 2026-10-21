@@ -8,6 +8,8 @@ export type {
   ChannelOptions,
   Conversation,
   IncomingImage,
+  OutgoingFile,
+  Reply,
   SayHandler,
 } from './server.ts';
-export { createChannel, MAX_SOCKET_PATH_BYTES, socketPathFor } from './server.ts';
+export { createChannel, MAX_SOCKET_PATH_BYTES, socketPathFor, textOf } from './server.ts';

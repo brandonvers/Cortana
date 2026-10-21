@@ -41,10 +41,16 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import type { Conversation, IncomingImage, SayHandler } from '@cortana/channel';
+import {
+  type Conversation,
+  type IncomingImage,
+  type OutgoingFile,
+  type SayHandler,
+  textOf,
+} from '@cortana/channel';
 import type { Secret } from '@cortana/config';
 import { AppError, isAppError, type Logger } from '@cortana/core';
-import { Bot, GrammyError, InlineKeyboard } from 'grammy';
+import { Bot, GrammyError, InlineKeyboard, InputFile } from 'grammy';
 import type { Update, UserFromGetMe } from 'grammy/types';
 import { splitForTelegram } from './split.ts';
 
@@ -91,6 +97,20 @@ const DEFAULT_ALBUM_WINDOW_MS = 1_000;
 const TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
 
 export const TURN_FAILED = 'Something went wrong answering that. The details are in the log.';
+
+export const FILE_NOT_SENT = 'A file that came with the answer could not be sent.';
+
+/** A file name's ending for a type, so the phone opens it with the right app. */
+function extensionOf(mediaType: string): string {
+  const known: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'video/mp4': 'mp4',
+  };
+  return known[mediaType] ?? 'bin';
+}
 
 const ALLOWED = 'Allowed.';
 const REFUSED = 'Refused.';
@@ -199,6 +219,28 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
     }
   };
 
+  /**
+   * The files of a reply, after its text, one message each.
+   *
+   * By type: an image as a photo, a video as a video, anything else as a
+   * document. A photo is recompressed by Telegram, which is fine for seeing
+   * which picture was meant — the person holds the original. A file that fails
+   * to send is said, and does not stop the ones after it.
+   */
+  const sendFiles = async (chatId: number, files: readonly OutgoingFile[]): Promise<void> => {
+    for (const file of files) {
+      const upload = new InputFile(file.data, `${file.id}.${extensionOf(file.mediaType)}`);
+      try {
+        if (file.mediaType.startsWith('image/')) await bot.api.sendPhoto(chatId, upload);
+        else if (file.mediaType.startsWith('video/')) await bot.api.sendVideo(chatId, upload);
+        else await bot.api.sendDocument(chatId, upload);
+      } catch (error) {
+        log?.error('a file could not be sent', { id: file.id, error: describe(error) });
+        await tell(chatId, `${FILE_NOT_SENT} (${file.id})`);
+      }
+    }
+  };
+
   const conversationIn = (chatId: number): Conversation => ({
     async ask(question, because) {
       const id = randomBytes(6).toString('hex');
@@ -267,7 +309,8 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
         images === undefined
           ? await options.onSay(text, conversation)
           : await options.onSay(text, conversation, images);
-      await tell(chatId, reply);
+      await tell(chatId, textOf(reply));
+      if (typeof reply !== 'string') await sendFiles(chatId, reply.files);
     } catch (error) {
       log?.error('a turn failed', { error: describe(error) });
       // A missing provider is the one failure the owner can act on, so it

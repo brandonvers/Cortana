@@ -84,11 +84,34 @@ export interface IncomingImage {
   readonly data: Uint8Array;
 }
 
+/**
+ * A file going back with a reply: what it is, and its bytes.
+ *
+ * The id is the one the system holds it under, which is how a person can refer
+ * to it in the next message. How it travels — a photo, a video, a document, a
+ * line in a terminal — is the channel's to decide from its type.
+ */
+export interface OutgoingFile {
+  readonly id: string;
+  readonly mediaType: string;
+  readonly data: Uint8Array;
+}
+
+/** An answer with files beside its text. A plain string is an answer with none. */
+export interface Reply {
+  readonly text: string;
+  readonly files: readonly OutgoingFile[];
+}
+
 export type SayHandler = (
   text: string,
   conversation: Conversation,
   images?: readonly IncomingImage[],
-) => Promise<string>;
+) => Promise<string | Reply>;
+
+/** The text of an answer, whichever form it came in. */
+export const textOf = (answer: string | Reply): string =>
+  typeof answer === 'string' ? answer : answer.text;
 
 export interface ChannelOptions {
   readonly dataDir: string;
@@ -182,7 +205,19 @@ export function createChannel(options: ChannelOptions): Channel {
       }
 
       try {
-        send({ type: 'reply', id: frame.id, text: await options.onSay(frame.text, conversation) });
+        const answer = await options.onSay(frame.text, conversation);
+        // A terminal shows what came with the answer rather than the bytes of
+        // it: the id, which a next message can name, its type and its size.
+        const files =
+          typeof answer === 'string'
+            ? ''
+            : answer.files
+                .map(
+                  (file) =>
+                    `\n[attached: ${file.id} (${file.mediaType}, ${Math.ceil(file.data.length / 1024)} KB)]`,
+                )
+                .join('');
+        send({ type: 'reply', id: frame.id, text: `${textOf(answer)}${files}` });
       } catch (error) {
         log?.error('a turn failed', { error: String(error) });
         // The message, not `String(error)`, which prefixes it with the class

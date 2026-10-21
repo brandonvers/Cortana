@@ -45,6 +45,8 @@ import {
   type Conversation,
   createChannel,
   type IncomingImage,
+  type OutgoingFile,
+  type Reply,
 } from '@cortana/channel';
 import type { Config } from '@cortana/config';
 import { AppError, type InstanceId, isAppError, type Logger } from '@cortana/core';
@@ -275,11 +277,34 @@ export function conversationComponents(options: ConversationOptions): Conversati
     return media;
   };
 
+  /**
+   * The reply, with the files it named.
+   *
+   * Only what the store holds is sent. An id it does not hold — mistyped,
+   * invented, or never there — sends nothing, and the person is told which,
+   * so a file that was meant to arrive does not silently fail to.
+   */
+  const withFiles = (reply: string, ids: readonly string[]): string | Reply => {
+    if (ids.length === 0) return reply;
+    const files: OutgoingFile[] = [];
+    const missing: string[] = [];
+    for (const id of new Set(ids)) {
+      const held = store().get(id);
+      if (held === null) missing.push(id);
+      else files.push({ id, mediaType: held.mediaType, data: store().read(id) });
+    }
+    const note =
+      missing.length === 0
+        ? ''
+        : `\n\n(Not sent: the system holds no file called ${missing.join(', ')}.)`;
+    return files.length === 0 ? `${reply}${note}` : { text: `${reply}${note}`, files };
+  };
+
   const answer = async (
     text: string,
     conversation: Conversation,
     images?: readonly IncomingImage[],
-  ): Promise<string> => {
+  ): Promise<string | Reply> => {
     // Kept before the turn, so the agent is handed ids the store already holds.
     // A file the store refuses — not an image, or too large to show — is the
     // person's to hear about, in the store's own words, and no turn is spent.
@@ -301,7 +326,7 @@ export function conversationComponents(options: ConversationOptions): Conversati
     }
 
     const message = sent.length === 0 ? text : { text, images: sent };
-    const turn = async (): Promise<string> => {
+    const turn = async (): Promise<string | Reply> => {
       const talking = await ensureAgent();
       // The approver is whoever is on *this* connection, for this turn. An
       // agent outlives the connections to it.
@@ -314,7 +339,7 @@ export function conversationComponents(options: ConversationOptions): Conversati
           await saveConversation(token, runnerName);
         }
       }
-      return exchange.reply;
+      return withFiles(exchange.reply, exchange.attachments);
     };
 
     try {
@@ -397,7 +422,7 @@ interface TelegramParts {
     text: string,
     conversation: Conversation,
     images?: readonly IncomingImage[],
-  ) => Promise<string>;
+  ) => Promise<string | Reply>;
   readonly log: Logger;
   readonly readCredential?: ReadCredential;
   readonly open: (options: TelegramOptions) => TelegramChannel;

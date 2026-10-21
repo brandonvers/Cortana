@@ -41,6 +41,21 @@ async function serve(onSay: SayHandler, options: { askTimeoutMs?: number } = {})
   return channel;
 }
 
+describe('an answer with files', () => {
+  it('shows each one on the socket by id, type and size, rather than its bytes', async () => {
+    await serve(async () => ({
+      text: 'Here is the cover.',
+      files: [{ id: '0123456789abcdef', mediaType: 'image/jpeg', data: new Uint8Array(2048) }],
+    }));
+    const client = await connect({ path: socketPathFor(dataDir), onAsk: async () => false });
+
+    const reply = await client.say('which one?');
+    client.close();
+
+    expect(reply).toBe('Here is the cover.\n[attached: 0123456789abcdef (image/jpeg, 2 KB)]');
+  });
+});
+
 describe('talking to it', () => {
   it('answers what it was asked', async () => {
     await serve(async (text) => `you said: ${text}`);
