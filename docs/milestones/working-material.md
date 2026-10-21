@@ -133,6 +133,15 @@ text is ever parsed as a filter.
 > so a model that calls a write a read changes nothing. One mutation survived
 > the first run: an action handed the raw input instead of what its schema
 > accepted would have seen a field the model slipped in. It is pinned.
+>
+> **What the step found, second half.** The first real action works, and its
+> caption path was checked by eye as well as by test: a frame of a made video,
+> with a caption of `kész' [x]; %{eif:1:d} \ ő ű`, shows those characters
+> drawn as text, accents intact, and no argument contains them. Homebrew's
+> plain `ffmpeg` is built without `drawtext`, which would have failed only
+> when a caption was drawn; the machine's tools are now found and said at boot,
+> preferring a build that can caption. [ADR-0022](../adr/0022-actions-are-decided-on-what-they-declare.md)
+> records the rules the action path follows.
 
 **5. Notes.** `remember` and `forget` are tools; notes live in the database and
 are composed into the agent's prompt at every wake. Writing one is a write, so

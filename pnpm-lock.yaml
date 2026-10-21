@@ -97,6 +97,9 @@ importers:
       '@cortana/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@cortana/media':
+        specifier: workspace:*
+        version: link:../media
       '@cortana/runner-claude':
         specifier: workspace:*
         version: link:../runner-claude

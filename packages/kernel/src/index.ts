@@ -25,3 +25,4 @@ export type { LoggerOptions } from './logger.ts';
 export { createLogger, REDACT_PATHS, REDACTION } from './logger.ts';
 export type { DetectionProbes, SecretProtection, SecretRung } from './secrets.ts';
 export { detectSecretProtection, probeThisMachine } from './secrets.ts';
+export { slideshowAction } from './slideshow-action.ts';
