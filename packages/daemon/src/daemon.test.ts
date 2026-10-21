@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
@@ -9,7 +9,7 @@ import { recordingLogger } from '@cortana/core/testing';
 import { instances, openStorage } from '@cortana/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EXIT } from './exit.ts';
-import { announceSecretProtection, reportStartupFailure, runDaemon } from './main.ts';
+import { announceSecretProtection, readVersion, reportStartupFailure, runDaemon } from './main.ts';
 
 const BIN = join(import.meta.dirname, 'bin.ts');
 
@@ -280,6 +280,19 @@ describe('when the operator has made a mistake', () => {
 
     expect(await daemon.exit()).toBe(EXIT.START_FAILED);
     expect(daemon.output()).toContain(occupied);
+  });
+});
+
+describe('the version it reports', () => {
+  it('is the release, from the repository’s manifest rather than this package’s', () => {
+    // release-please versions the root; the packages stay at 0.0.0. A server
+    // running 0.2.0 logged 0.0.0 until this read the right file.
+    const root = JSON.parse(
+      readFileSync(join(import.meta.dirname, '..', '..', '..', 'package.json'), 'utf8'),
+    ) as { version: string };
+
+    expect(readVersion()).toBe(root.version);
+    expect(readVersion()).not.toBe('0.0.0');
   });
 });
 
