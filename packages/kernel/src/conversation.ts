@@ -60,6 +60,13 @@ import {
   type TelegramOptions,
 } from '@cortana/telegram';
 import { eq } from 'drizzle-orm';
+import {
+  type KernelAction,
+  MAX_ACTION_ROUNDS,
+  type Performed,
+  perform,
+  resultsMessage,
+} from './actions.ts';
 import type { ReadCredential } from './credentials.ts';
 import type { Component } from './lifecycle.ts';
 import { agentSessions } from './schema.ts';
@@ -98,6 +105,8 @@ export interface ConversationOptions {
   /** Builds the bot. Replaced in tests, so that a test can be Telegram. */
   readonly openTelegram?: (options: TelegramOptions) => TelegramChannel;
   readonly telegramRetryMs?: number;
+  /** What the kernel can do for the agent. Only those the configuration names are offered. */
+  readonly actions?: readonly KernelAction[];
 }
 
 export interface ConversationParts {
@@ -126,9 +135,19 @@ export function conversationComponents(options: ConversationOptions): Conversati
    * them — see `workingProfile`. With the default configuration this profile
    * permits nothing at all, and the agent can only talk.
    */
+  // The actions this agent is offered: what the configuration names, of what
+  // exists. A name with no action behind it is said once, at construction.
+  const registered = new Map((options.actions ?? []).map((action) => [action.name, action]));
+  const offered = options.config.agent.actions.filter((name) => registered.has(name));
+  for (const name of options.config.agent.actions) {
+    if (!registered.has(name))
+      log.warn('the configuration names an action that does not exist', { name });
+  }
+
   const profile = workingProfile({
     name: 'main',
     tools: options.config.agent.tools,
+    actions: offered,
     readable: options.config.agent.readable,
     writable: options.config.agent.writable,
     confirm: options.config.agent.confirm,
@@ -218,6 +237,7 @@ export function conversationComponents(options: ConversationOptions): Conversati
         tier: options.config.agent.tier,
         logger: log,
         ...(resume === undefined ? {} : { resume }),
+        actions: offered.map((name) => registered.get(name) as KernelAction),
       });
       agent = started;
       continuing = resume !== undefined;
@@ -330,8 +350,33 @@ export function conversationComponents(options: ConversationOptions): Conversati
       const talking = await ensureAgent();
       // The approver is whoever is on *this* connection, for this turn. An
       // agent outlives the connections to it.
-      const exchange = await talking.say(message, approvalThrough(conversation));
+      const approve = approvalThrough(conversation);
+      let exchange = await talking.say(message, approve);
       continuing = false;
+
+      // What was allowed is run, and the agent is told how it went — a bounded
+      // number of times, so an agent that keeps asking still has to answer.
+      const made: string[] = [];
+      for (let round = 0; round < MAX_ACTION_ROUNDS; round += 1) {
+        const runnable = exchange.actions.filter(
+          (action) => action.decision.verdict === 'allow' && registered.has(action.intent.tool),
+        );
+        if (runnable.length === 0) break;
+        const results: Performed[] = [];
+        for (const action of runnable) {
+          const kernelAction = registered.get(action.intent.tool) as KernelAction;
+          log.info('running an action', { action: kernelAction.name });
+          const result = await perform(kernelAction, action.intent.input, { store: store(), log });
+          results.push(result);
+          made.push(...result.files);
+        }
+        exchange = await talking.say(resultsMessage(results), approve);
+      }
+      if (exchange.actions.some((action) => action.decision.verdict === 'allow')) {
+        log.warn('the agent asked for more actions than one message may run', {
+          rounds: MAX_ACTION_ROUNDS,
+        });
+      }
       const token = talking.resumeToken;
       if (token !== null && runnerName !== null) {
         const saved = savedConversation();
@@ -339,7 +384,9 @@ export function conversationComponents(options: ConversationOptions): Conversati
           await saveConversation(token, runnerName);
         }
       }
-      return withFiles(exchange.reply, exchange.attachments);
+      // What an action made is sent whether or not the agent attached it: the
+      // person asked for the video, not for the agent to remember its id.
+      return withFiles(exchange.reply, [...exchange.attachments, ...made]);
     };
 
     try {

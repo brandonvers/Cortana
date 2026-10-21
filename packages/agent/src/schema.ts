@@ -64,6 +64,20 @@ export const toolIntent = z.object({
     .string()
     .min(1)
     .describe('One sentence a person can act on, because a person may be asked to approve this.'),
+  /**
+   * What the action is given, as JSON in a string.
+   *
+   * A string rather than an object because each action has its own shape, and
+   * one answer schema has to carry all of them: the action's own schema checks
+   * it when it runs, and a value it rejects is refused before anything happens.
+   * Defaulted, so an intent written before inputs existed means none.
+   */
+  input: z
+    .string()
+    .default('{}')
+    .describe(
+      'The action\'s input as a JSON object, written as a string. "{}" when it takes none.',
+    ),
 });
 
 export type ToolIntent = z.infer<typeof toolIntent>;

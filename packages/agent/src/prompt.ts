@@ -74,6 +74,38 @@ export interface PromptParts {
   /** Who this agent is. The only half a person writes. */
   readonly persona: string;
   readonly profile: Profile;
+  /** The actions the kernel will run for this agent, if it asks. */
+  readonly actions?: readonly ActionDescription[];
+}
+
+/**
+ * An action, as the model is told about it and as the decision sees it.
+ *
+ * `writes` and `network` are the action's own declaration, and they are what
+ * the policy engine decides on — not what the model fills in on its intent.
+ */
+export interface ActionDescription {
+  readonly name: string;
+  /** What it does, in a sentence the model can choose by. */
+  readonly description: string;
+  /** The JSON its input takes, shown to the model as an example. */
+  readonly input: string;
+  readonly writes: boolean;
+  readonly network: boolean;
+}
+
+/** The actions, as a section of the prompt. Nothing when there are none. */
+function describeActions(actions: readonly ActionDescription[]): string | null {
+  if (actions.length === 0) return null;
+  const lines = actions.map(
+    (action) => `- ${action.name}: ${action.description}\n  input: ${action.input}`,
+  );
+  return [
+    'Actions the kernel will run for you when you list them in "actions" — set "tool"',
+    'to the name and "input" to the JSON shown. You are told the result in the next',
+    'message, and a file it makes is sent with your reply to that.',
+    ...lines,
+  ].join('\n');
 }
 
 /**
@@ -86,5 +118,12 @@ export interface PromptParts {
  * and cached, not repeated per turn", and this is what makes that true.
  */
 export function composePrompt(parts: PromptParts): string {
-  return [parts.persona.trim(), describeProfile(parts.profile), SHAPE].join('\n\n');
+  return [
+    parts.persona.trim(),
+    describeProfile(parts.profile),
+    describeActions(parts.actions ?? []),
+    SHAPE,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n\n');
 }

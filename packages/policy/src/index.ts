@@ -1,6 +1,8 @@
 export type { Decision, ToolRequest, Verdict } from './decide.ts';
 export {
   decide,
+  decideAction,
+  decideActionForSession,
   decideForSession,
   decideWithConfirmation,
   isInside,

@@ -103,6 +103,8 @@ export interface KernelOptions {
   readonly openTelegram?: ConversationOptions['openTelegram'];
   /** How long to wait before trying an unreachable Telegram again. Shortened in tests. */
   readonly telegramRetryMs?: number;
+  /** What the kernel can do for the agent; see `actions.ts`. */
+  readonly actions?: ConversationOptions['actions'];
 }
 
 export interface RunningKernel {
@@ -244,6 +246,7 @@ export async function startKernel(options: KernelOptions): Promise<RunningKernel
     ...(options.readCredential === undefined ? {} : { readCredential: options.readCredential }),
     ...(options.openTelegram === undefined ? {} : { openTelegram: options.openTelegram }),
     ...(options.telegramRetryMs === undefined ? {} : { telegramRetryMs: options.telegramRetryMs }),
+    ...(options.actions === undefined ? {} : { actions: options.actions }),
   });
 
   const lifecycle = createLifecycle({

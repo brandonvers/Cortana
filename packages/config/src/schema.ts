@@ -89,6 +89,12 @@ export const configSchema = z.strictObject({
      * whose approval path cannot be reached.
      */
     tools: z.array(z.string().min(1)),
+    /**
+     * What the agent may ask the kernel to do — actions the kernel runs
+     * itself, such as making a video from photos. Empty by default for the
+     * reason `tools` is: a capability nobody asked for is not a default.
+     */
+    actions: z.array(z.string().min(1)),
     readable: z.array(z.string().refine(isAbsolute, { error: 'must be an absolute path' })),
     writable: z.array(z.string().refine(isAbsolute, { error: 'must be an absolute path' })),
     /**

@@ -60,6 +60,17 @@ export interface Profile {
    * list of what is allowed.
    */
   readonly tools: readonly string[];
+  /**
+   * What this session may ask the **kernel** to do for it — the actions the
+   * kernel runs itself, outside the session, after deciding them.
+   *
+   * Kept apart from `tools` on purpose. `tools` is the provider's vocabulary and
+   * becomes the provider's allowlist; an action is this project's, and never
+   * reaches the provider as something it could call. Two lists, so a name in
+   * one cannot quietly mean something in the other. Absent means none, which is
+   * every profile written before actions ran.
+   */
+  readonly actions?: readonly string[];
   /** Absolute paths this session may read. */
   readonly readable: readonly string[];
   /** Absolute paths this session may write. */
@@ -233,6 +244,7 @@ export const QUARANTINE: Profile = quarantineProfile({ source: 'unattributed' })
 export interface WorkingOptions {
   readonly name: string;
   readonly tools?: readonly string[];
+  readonly actions?: readonly string[];
   readonly readable?: readonly string[];
   readonly writable?: readonly string[];
   readonly denyRead?: readonly string[];
@@ -262,6 +274,7 @@ export function workingProfile(options: WorkingOptions): Profile {
     name: options.name,
     trust: 'owner',
     tools,
+    actions: [...(options.actions ?? [])],
     readable: [...(options.readable ?? [])],
     writable: [...(options.writable ?? [])],
     denyRead: [...(options.denyRead ?? [])],

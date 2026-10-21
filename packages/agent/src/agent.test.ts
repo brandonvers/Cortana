@@ -172,6 +172,61 @@ describe('a turn', () => {
     expect((await agent.say('hello')).attachments).toEqual([]);
   });
 
+  it('decides an action on what the action declares, not on what the model says', async () => {
+    // The model calls a write a read. The action says it writes, under a profile
+    // that confirms writes, so it is put to a person — and nobody is there.
+    const runner = fakeRunner({
+      values: [
+        answer('Noted.', [
+          action({ tool: 'remember', path: null, writes: false, input: '{"note":"x"}' }),
+        ]),
+      ],
+    });
+    const agent = await createAgent({
+      runner,
+      profile: { ...WORKING, actions: ['remember'], confirm: 'writes' },
+      persona: 'p',
+      actions: [
+        {
+          name: 'remember',
+          description: 'keeps a note',
+          input: '{"note":"…"}',
+          writes: true,
+          network: false,
+        },
+      ],
+    });
+
+    const exchange = await agent.say('remember x');
+
+    expect(exchange.actions[0]?.decision.verdict).toBe('deny');
+    expect(exchange.actions[0]?.decision.because).toContain('nobody is available to ask');
+    expect(exchange.actions[0]?.intent.input).toBe('{"note":"x"}');
+  });
+
+  it('tells the model which actions exist, and says nothing of actions when there are none', async () => {
+    const runner = fakeRunner({ values: [answer('ok')] });
+    await createAgent({
+      runner,
+      profile: { ...WORKING, actions: ['make_slideshow'] },
+      persona: 'p',
+      actions: [
+        {
+          name: 'make_slideshow',
+          description: 'turns photos into a vertical video',
+          input: '{"photos":[…]}',
+          writes: false,
+          network: false,
+        },
+      ],
+    });
+    const plain = fakeRunner({ values: [answer('ok')] });
+    await createAgent({ runner: plain, profile: WORKING, persona: 'p' });
+
+    expect(runner.opened[0]?.systemPrompt).toContain('- make_slideshow: turns photos');
+    expect(plain.opened[0]?.systemPrompt).not.toContain('Actions the kernel will run');
+  });
+
   it('reports what a turn cost, so the audit and the governor see the same number', async () => {
     const agent = await agentOver([answer('ok')]);
 
