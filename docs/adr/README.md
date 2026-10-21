@@ -29,6 +29,7 @@ how settled questions stay settled.
 | [0019](0019-the-audit-stores-what-was-said.md) | The audit stores what was said, and the documentation says so | Accepted |
 | [0020](0020-the-provider-sdk-is-a-peer-dependency.md) | The provider SDK is a peer dependency the user installs | Accepted |
 | [0021](0021-containment-is-an-allowlist-applied-to-every-call.md) | Containment is an allowlist, applied to every call | Accepted |
+| [0022](0022-actions-are-decided-on-what-they-declare.md) | What the kernel does for an agent is decided on what it declares, and touches files by id | Accepted |
 
 ## When to write one
 

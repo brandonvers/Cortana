@@ -19,6 +19,7 @@
     "@cortana/config": "workspace:*",
     "@cortana/core": "workspace:*",
     "@cortana/kernel": "workspace:*",
+    "@cortana/media": "workspace:*",
     "@cortana/runner-claude": "workspace:*",
     "@cortana/storage": "workspace:*"
   }
