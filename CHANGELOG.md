@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.0](https://github.com/brandonvers/Cortana/compare/v0.3.0...v0.4.0) (2026-10-22)
+
+
+### Features
+
+* **channel:** what the system itself says comes in the owner's language ([#96](https://github.com/brandonvers/Cortana/issues/96)) ([bc2841e](https://github.com/brandonvers/Cortana/commit/bc2841ea0a89ea37f613227eb81a4715407b3b92))
+* **kernel:** the kernel runs what the agent asks for, once it is decided ([#92](https://github.com/brandonvers/Cortana/issues/92)) ([a019dea](https://github.com/brandonvers/Cortana/commit/a019dea7b05086e5cc2800ef194ea8090adf89a2))
+* **media:** a clip the owner sends goes into the video beside the photos ([#97](https://github.com/brandonvers/Cortana/issues/97)) ([875b0a7](https://github.com/brandonvers/Cortana/commit/875b0a77e2718f94222df1ed878899e67d53b21e))
+* **media:** photos become a captioned vertical video, made by ffmpeg on request ([#94](https://github.com/brandonvers/Cortana/issues/94)) ([dfa8280](https://github.com/brandonvers/Cortana/commit/dfa828000e8608aa94291d3c70ad99d1068770f3))
+* **telegram:** an answer can carry files back, named by id and only if held ([#91](https://github.com/brandonvers/Cortana/issues/91)) ([0483615](https://github.com/brandonvers/Cortana/commit/0483615910ee58f936e1db5a10782d6239ba0577))
+
+
+### Bug fixes
+
+* **daemon:** report the release that is running, not 0.0.0 ([#89](https://github.com/brandonvers/Cortana/issues/89)) ([e53450e](https://github.com/brandonvers/Cortana/commit/e53450ea1132a481f41918d62a108fd1f9f94851))
+* **kernel:** a conversation continues only under the instructions it began with ([#95](https://github.com/brandonvers/Cortana/issues/95)) ([bda988e](https://github.com/brandonvers/Cortana/commit/bda988ec1c9a5bd1a104e6391f67dfc8b91c1e0f))
+
+
+### Build system
+
+* **deps:** Bump the npm_and_yarn group across 3 directories with 5 updates ([#93](https://github.com/brandonvers/Cortana/issues/93)) ([adf5c0f](https://github.com/brandonvers/Cortana/commit/adf5c0fe51ee1769ac0e8ecb0b6e54f02e36d82c))
+
 ## [0.3.0](https://github.com/brandonvers/Cortana/compare/v0.2.0...v0.3.0) (2026-10-20)
 
 
