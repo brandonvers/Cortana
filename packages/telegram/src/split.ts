@@ -19,9 +19,13 @@ export const TELEGRAM_MAX_MESSAGE = 4_096;
 /** What is sent when the reply is empty, because an empty message is refused. */
 export const EMPTY_REPLY = 'The agent finished without saying anything.';
 
-export function splitForTelegram(text: string, limit = TELEGRAM_MAX_MESSAGE): string[] {
+export function splitForTelegram(
+  text: string,
+  limit = TELEGRAM_MAX_MESSAGE,
+  empty = EMPTY_REPLY,
+): string[] {
   if (limit < 2) throw new Error(`a message limit of ${limit} cannot hold a character`);
-  if (text.trim() === '') return [EMPTY_REPLY];
+  if (text.trim() === '') return [empty];
 
   const pieces: string[] = [];
   let rest = text;

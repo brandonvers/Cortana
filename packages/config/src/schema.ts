@@ -32,6 +32,13 @@ export type LogLevel = (typeof LOG_LEVELS)[number];
 export const MODEL_TIERS = ['fast', 'balanced', 'deep'] as const;
 
 /**
+ * The languages the system's own sentences are written in. Repeated from
+ * `@cortana/channel` for the reason `MODEL_TIERS` is, and held to it by the same
+ * test.
+ */
+export const LANGUAGES = ['en', 'hu'] as const;
+
+/**
  * The object is strict: an unrecognised key is an error rather than something
  * ignored. A misspelled setting that silently does nothing is the worst outcome
  * available, because the system starts, looks configured, and behaves as though
@@ -48,6 +55,13 @@ export const configSchema = z.strictObject({
   log: z.strictObject({
     level: z.enum(LOG_LEVELS),
   }),
+
+  /**
+   * The language of what the system itself says to a person — an approval's
+   * buttons, a refusal, the note that a file could not be sent. Not the
+   * agent's: a model answers in whatever language it is spoken to.
+   */
+  language: z.enum(LANGUAGES),
 
   audit: z.strictObject({
     /**

@@ -15,6 +15,7 @@ beforeEach(() => {
   config = {
     dataDir: join(root, 'state'),
     log: { level: 'info' },
+    language: 'en',
     audit: { retentionDays: 90 },
     agent: {
       persona: 'You are Cortana.',

@@ -110,6 +110,7 @@ function defaults(env: Env): Tree {
   return {
     dataDir: defaultDataDir(env),
     log: { level: 'info' },
+    language: 'en',
     audit: { retentionDays: 90 },
     agent: {
       // Deliberately plain. A persona is the operator's to write, and a default

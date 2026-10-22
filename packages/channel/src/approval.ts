@@ -17,6 +17,7 @@
  */
 
 import type { Decision, ToolRequest } from '@cortana/policy';
+import { PHRASES, type Phrasebook } from './phrases.ts';
 import type { Conversation } from './server.ts';
 
 /**
@@ -26,11 +27,8 @@ import type { Conversation } from './server.ts';
  * elides the middle of a path is an approval prompt that reads the same for two
  * different files, and the difference between them is the entire question.
  */
-export function questionFor(request: ToolRequest): string {
-  const verb = request.writes === true ? 'write' : 'use';
-  const target = request.path === undefined ? '' : ` on ${request.path}`;
-  const reach = request.network === true ? ', reaching the network' : '';
-  return `The agent wants to ${verb} ${request.tool}${target}${reach}. Allow it?`;
+export function questionFor(request: ToolRequest, phrases: Phrasebook = PHRASES.en): string {
+  return phrases.question(request);
 }
 
 /**
@@ -42,7 +40,7 @@ export function questionFor(request: ToolRequest): string {
  * a property of that method rather than of this function, and the reason this
  * one is three lines.
  */
-export function approvalThrough(conversation: Conversation) {
+export function approvalThrough(conversation: Conversation, phrases: Phrasebook = PHRASES.en) {
   return async (request: ToolRequest, decision: Decision): Promise<boolean> =>
-    conversation.ask(questionFor(request), decision.because);
+    conversation.ask(questionFor(request, phrases), decision.because);
 }

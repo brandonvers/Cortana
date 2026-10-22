@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { connect, socketPathFor } from '@cortana/channel';
+import { connect, PHRASES, socketPathFor } from '@cortana/channel';
 import { type Config, Secret } from '@cortana/config';
 import { AppError, isAppError } from '@cortana/core';
 import { recordingLogger } from '@cortana/core/testing';
@@ -39,6 +39,7 @@ beforeEach(() => {
   config = {
     dataDir: join(root, 'state'),
     log: { level: 'error' },
+    language: 'en',
     audit: { retentionDays: 90 },
     agent: {
       persona: 'You are Cortana.',
@@ -302,6 +303,43 @@ describe('a photo from the phone', () => {
     await vi.waitFor(() => expect(tg.sent).toHaveLength(1));
     expect(tg.sent[0]).toContain('not an image');
     expect(runner.turns).toHaveLength(0);
+  });
+});
+
+describe('in Hungarian, when the configuration says so', () => {
+  it('says what the system itself says in it, and leaves the agent’s words alone', async () => {
+    const runner = fakeRunner({
+      values: [
+        { reply: 'Itt van.', actions: [], attachments: ['ffffffffffffffff'] },
+        answer('   '),
+      ],
+    });
+    const tg = telegram(() => null, { 'not-a-photo': new TextEncoder().encode('<html>') });
+    kernel = await startKernel({
+      config: { ...config, language: 'hu' },
+      logger: recordingLogger(),
+      version: '0.4.0',
+      openRunner: async () => runner,
+      readCredential: () => token(),
+      openTelegram: tg.open,
+    });
+
+    await tg.bot.receive(photoMessage('not-a-photo'));
+    await vi.waitFor(() => expect(tg.sent).toHaveLength(1));
+    await tg.bot.receive(message('mutasd'));
+    await vi.waitFor(() => expect(tg.sent).toHaveLength(2));
+    await tg.bot.receive(message('és most?'));
+    await vi.waitFor(() => expect(tg.sent).toHaveLength(3));
+    await tg.bot.receive(message('/new'));
+    await vi.waitFor(() => expect(tg.sent).toHaveLength(4));
+
+    expect(tg.sent).toEqual([
+      PHRASES.hu.fileRefused('media-not-an-image', ''),
+      `Itt van.${PHRASES.hu.notHeld(['ffffffffffffffff'])}`,
+      // Said by the bot, which the kernel handed the same phrasebook.
+      PHRASES.hu.emptyReply,
+      PHRASES.hu.startedOver,
+    ]);
   });
 });
 

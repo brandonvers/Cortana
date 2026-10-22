@@ -2,8 +2,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { auditTurns } from '@cortana/audit';
-import { connect, socketPathFor } from '@cortana/channel';
-import { MODEL_TIERS as CONFIGURABLE_TIERS, type Config } from '@cortana/config';
+import { connect, LANGUAGES as SPOKEN, socketPathFor } from '@cortana/channel';
+import {
+  LANGUAGES as CONFIGURABLE_LANGUAGES,
+  MODEL_TIERS as CONFIGURABLE_TIERS,
+  type Config,
+} from '@cortana/config';
 import { recordingLogger } from '@cortana/core/testing';
 import { MODEL_TIERS } from '@cortana/runner';
 import { type FakeRunner, fakeRunner } from '@cortana/runner/testing';
@@ -25,6 +29,7 @@ beforeEach(() => {
   config = {
     dataDir: join(root, 'state'),
     log: { level: 'error' },
+    language: 'en',
     audit: { retentionDays: 90 },
     agent: {
       persona: 'You are Cortana.',
@@ -408,6 +413,14 @@ describe('a decision the policy engine will not make on its own', () => {
 
     // The refusal is carried into the next turn's prompt, so the agent knows.
     expect(runner.turns[1]?.prompt).toContain('refused by the operator');
+  });
+});
+
+describe('the languages configuration accepts', () => {
+  it('are exactly the languages there are sentences for', () => {
+    // Repeated in `@cortana/config` for the reason the tiers are, and held here
+    // for the same one.
+    expect([...CONFIGURABLE_LANGUAGES]).toEqual([...SPOKEN]);
   });
 });
 

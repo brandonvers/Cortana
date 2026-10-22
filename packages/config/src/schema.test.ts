@@ -6,6 +6,7 @@ import { Secret } from './secret.ts';
 const VALID = {
   dataDir: '/var/lib/cortana',
   log: { level: 'info' },
+  language: 'en',
   audit: { retentionDays: 90 },
   agent: {
     persona: 'You are Cortana.',
@@ -23,6 +24,11 @@ const VALID = {
 describe('configSchema', () => {
   it('accepts a complete configuration', () => {
     expect(configSchema.parse(VALID)).toEqual(VALID);
+  });
+
+  it('accepts Hungarian and refuses a language it has no sentences for', () => {
+    expect(configSchema.parse({ ...VALID, language: 'hu' }).language).toBe('hu');
+    expect(configSchema.safeParse({ ...VALID, language: 'de' }).success).toBe(false);
   });
 
   it('rejects an unrecognised key instead of ignoring it', () => {

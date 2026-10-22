@@ -47,6 +47,8 @@ import {
   createChannel,
   type IncomingImage,
   type OutgoingFile,
+  PHRASES,
+  type Phrasebook,
   type Reply,
 } from '@cortana/channel';
 import type { Config } from '@cortana/config';
@@ -77,8 +79,7 @@ const MAIN = 'main';
 
 /** What a person sends to set the conversation aside and begin another. */
 export const NEW_CONVERSATION = '/new';
-export const STARTED_OVER =
-  'Started a new conversation. What was said before is no longer carried forward.';
+export const STARTED_OVER = PHRASES.en.startedOver;
 
 /** The name the bot's token is stored under, on every rung. */
 export const TELEGRAM_TOKEN = 'telegram-bot-token';
@@ -127,6 +128,8 @@ export interface ConversationParts {
  */
 export function conversationComponents(options: ConversationOptions): ConversationParts {
   const log = options.logger;
+  /** What the system itself says to the person, in the configured language. */
+  const phrases = PHRASES[options.config.language];
 
   /**
    * What the one agent may do.
@@ -345,10 +348,7 @@ export function conversationComponents(options: ConversationOptions): Conversati
       if (held === null) missing.push(id);
       else files.push({ id, mediaType: held.mediaType, data: store().read(id) });
     }
-    const note =
-      missing.length === 0
-        ? ''
-        : `\n\n(Not sent: the system holds no file called ${missing.join(', ')}.)`;
+    const note = missing.length === 0 ? '' : phrases.notHeld(missing);
     return files.length === 0 ? `${reply}${note}` : { text: `${reply}${note}`, files };
   };
 
@@ -367,14 +367,16 @@ export function conversationComponents(options: ConversationOptions): Conversati
         return { id: held.id, mediaType: held.mediaType, data: image.data };
       });
     } catch (error) {
-      if (isAppError(error) && error.category === 'contract') return error.message;
+      if (isAppError(error) && error.category === 'contract') {
+        return phrases.fileRefused(error.code, error.message);
+      }
       throw error;
     }
 
     if (sent.length === 0 && text.trim() === NEW_CONVERSATION) {
       await startOver();
       log.info('a new conversation was asked for');
-      return STARTED_OVER;
+      return phrases.startedOver;
     }
 
     const message = sent.length === 0 ? text : { text, images: sent };
@@ -382,7 +384,7 @@ export function conversationComponents(options: ConversationOptions): Conversati
       const talking = await ensureAgent();
       // The approver is whoever is on *this* connection, for this turn. An
       // agent outlives the connections to it.
-      const approve = approvalThrough(conversation);
+      const approve = approvalThrough(conversation, phrases);
       let exchange = await talking.say(message, approve);
       continuing = false;
 
@@ -488,6 +490,7 @@ export function conversationComponents(options: ConversationOptions): Conversati
         log,
         ...(options.readCredential === undefined ? {} : { readCredential: options.readCredential }),
         open: options.openTelegram ?? createTelegramChannel,
+        phrases,
         retryMs: options.telegramRetryMs ?? TELEGRAM_RETRY_MS,
       }),
     );
@@ -509,6 +512,7 @@ interface TelegramParts {
   readonly log: Logger;
   readonly readCredential?: ReadCredential;
   readonly open: (options: TelegramOptions) => TelegramChannel;
+  readonly phrases: Phrasebook;
   readonly retryMs: number;
 }
 
@@ -577,6 +581,7 @@ function telegramComponent(parts: TelegramParts): Component {
         allowedUserIds: parts.allowedUserIds,
         onSay: parts.answer,
         logger: log,
+        phrases: parts.phrases,
       });
       channel = bot;
       await connect(bot);
