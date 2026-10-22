@@ -45,6 +45,8 @@ import {
   type Conversation,
   type IncomingImage,
   type OutgoingFile,
+  PHRASES,
+  type Phrasebook,
   type SayHandler,
   textOf,
 } from '@cortana/channel';
@@ -52,7 +54,7 @@ import type { Secret } from '@cortana/config';
 import { AppError, isAppError, type Logger } from '@cortana/core';
 import { Bot, GrammyError, InlineKeyboard, InputFile } from 'grammy';
 import type { Update, UserFromGetMe } from 'grammy/types';
-import { splitForTelegram } from './split.ts';
+import { splitForTelegram, TELEGRAM_MAX_MESSAGE } from './split.ts';
 
 /** How long an unanswered question waits before it is a no. The socket's figure. */
 const DEFAULT_ASK_TIMEOUT_MS = 120_000;
@@ -72,17 +74,11 @@ const DEFAULT_START_TIMEOUT_MS = 10_000;
 /** Telegram shows "typing…" for five seconds per call, so it is renewed inside that. */
 const TYPING_EVERY_MS = 4_000;
 
-export const FORWARDED_REFUSAL =
-  'A forwarded message is somebody else’s words, and it would reach the agent as ' +
-  'though you had written them. That is not allowed yet — copy the part you mean ' +
-  'into a message of your own.';
+export const FORWARDED_REFUSAL = PHRASES.en.forwardedRefusal;
 
-export const NOT_PASSED_ON =
-  'Text and photos reach the agent; voice, video and other files are not passed on yet.';
+export const NOT_PASSED_ON = PHRASES.en.notPassedOn;
 
-export const PHOTO_NOT_FETCHED =
-  'A photo could not be fetched from Telegram, so nothing was sent to the agent. ' +
-  'Try sending it again.';
+export const PHOTO_NOT_FETCHED = PHRASES.en.mediaNotFetched;
 
 /**
  * How long an album is waited on after its latest photo.
@@ -96,9 +92,7 @@ const DEFAULT_ALBUM_WINDOW_MS = 1_000;
 /** The most Telegram lets a bot download, in bytes. Its own limit, not a choice. */
 const TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
 
-export const TURN_FAILED = 'Something went wrong answering that. The details are in the log.';
-
-export const FILE_NOT_SENT = 'A file that came with the answer could not be sent.';
+export const TURN_FAILED = PHRASES.en.turnFailed;
 
 /** A file name's ending for a type, so the phone opens it with the right app. */
 function extensionOf(mediaType: string): string {
@@ -111,12 +105,6 @@ function extensionOf(mediaType: string): string {
   };
   return known[mediaType] ?? 'bin';
 }
-
-const ALLOWED = 'Allowed.';
-const REFUSED = 'Refused.';
-const UNANSWERED = 'No answer, so refused.';
-const CLOSED = 'The daemon stopped before this was answered, so it was refused.';
-const STALE = 'That question is no longer open.';
 
 /** What Telegram's API answers, in its own envelope. */
 export type TelegramResponse =
@@ -145,6 +133,8 @@ export interface TelegramOptions {
   /** How long to wait for Telegram at start before calling it unreachable. */
   readonly startTimeoutMs?: number;
   readonly albumWindowMs?: number;
+  /** What the bot itself says, in the owner's language. English when not given. */
+  readonly phrases?: Phrasebook;
   /**
    * Fetches a file Telegram holds, by the path `getFile` gave for it. Replaced
    * in tests, so a test can be Telegram's file server too.
@@ -184,6 +174,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
   }
 
   const log = options.logger?.child({ component: 'telegram' });
+  const phrases = options.phrases ?? PHRASES.en;
   const allowed = new Set(options.allowedUserIds);
   const askTimeoutMs = options.askTimeoutMs ?? DEFAULT_ASK_TIMEOUT_MS;
 
@@ -205,7 +196,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
   let tail: Promise<void> = Promise.resolve();
 
   const sendText = async (chatId: number, text: string): Promise<void> => {
-    for (const piece of splitForTelegram(text)) {
+    for (const piece of splitForTelegram(text, TELEGRAM_MAX_MESSAGE, phrases.emptyReply)) {
       await bot.api.sendMessage(chatId, piece);
     }
   };
@@ -236,7 +227,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
         else await bot.api.sendDocument(chatId, upload);
       } catch (error) {
         log?.error('a file could not be sent', { id: file.id, error: describe(error) });
-        await tell(chatId, `${FILE_NOT_SENT} (${file.id})`);
+        await tell(chatId, phrases.fileNotSent(file.id));
       }
     }
   };
@@ -248,8 +239,8 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
       try {
         const message = await bot.api.sendMessage(chatId, `${question}\n\n${because}`, {
           reply_markup: new InlineKeyboard()
-            .text('Allow', `ask:${id}:y`)
-            .text('Refuse', `ask:${id}:n`),
+            .text(phrases.allow, `ask:${id}:y`)
+            .text(phrases.refuse, `ask:${id}:n`),
         });
         sent = message.message_id;
       } catch (error) {
@@ -262,7 +253,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
       return new Promise<boolean>((resolve) => {
         const timer = setTimeout(() => {
           log?.warn('an approval went unanswered and was treated as a refusal', { askTimeoutMs });
-          entry.settle(false, UNANSWERED);
+          entry.settle(false, phrases.unanswered);
         }, askTimeoutMs);
 
         const entry: OpenQuestion = {
@@ -318,7 +309,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
       // a sentence that points at the log, never a stack trace on a phone.
       await tell(
         chatId,
-        isAppError(error) && error.category === 'config' ? error.message : TURN_FAILED,
+        isAppError(error) && error.category === 'config' ? error.message : phrases.turnFailed,
       );
     } finally {
       clearInterval(renew);
@@ -347,11 +338,11 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
     // allowlist already admits only the owner, so this is the second statement
     // of it rather than the control.
     if (question === undefined || question.chatId !== ctx.chat?.id) {
-      await ctx.answerCallbackQuery({ text: STALE }).catch(() => {});
+      await ctx.answerCallbackQuery({ text: phrases.stale }).catch(() => {});
       return;
     }
     const approved = match?.[2] === 'y';
-    question.settle(approved, approved ? ALLOWED : REFUSED);
+    question.settle(approved, approved ? phrases.allowed : phrases.refused);
     await ctx.answerCallbackQuery().catch(() => {});
   });
 
@@ -401,7 +392,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
   ): Promise<void> => {
     const images = await Promise.all(fetched);
     if (images.some((image) => image === null)) {
-      await tell(chatId, PHOTO_NOT_FETCHED);
+      await tell(chatId, phrases.mediaNotFetched);
       return;
     }
     await runTurn(chatId, text, images as IncomingImage[]);
@@ -458,7 +449,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
     const chatId = ctx.chat.id;
     const message = ctx.message;
     if (message.forward_origin !== undefined) {
-      tail = tail.then(() => tell(chatId, FORWARDED_REFUSAL));
+      tail = tail.then(() => tell(chatId, phrases.forwardedRefusal));
       return;
     }
 
@@ -479,7 +470,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
     }
 
     if (message.text === undefined) {
-      tail = tail.then(() => tell(chatId, NOT_PASSED_ON));
+      tail = tail.then(() => tell(chatId, phrases.notPassedOn));
       return;
     }
     const text = message.text;
@@ -544,7 +535,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
       }
       albums.clear();
       if (bot.isRunning()) await bot.stop();
-      for (const question of [...open.values()]) question.settle(false, CLOSED);
+      for (const question of [...open.values()]) question.settle(false, phrases.closed);
     },
 
     receive: (update) => bot.handleUpdate(update),

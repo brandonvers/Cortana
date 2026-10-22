@@ -142,6 +142,15 @@ text is ever parsed as a filter.
 > when a caption was drawn; the machine's tools are now found and said at boot,
 > preferring a build that can caption. [ADR-0022](../adr/0022-actions-are-decided-on-what-they-declare.md)
 > records the rules the action path follows.
+>
+> **Found in use, between steps.** The agent answers in Hungarian; the system
+> did not. A refusal of a video, the one sentence explaining what went wrong,
+> arrived in English at the end of a Hungarian conversation. What the system
+> itself says — refusals, an approval's question and buttons, `/new`, a file
+> the store would not keep — now comes from a phrasebook chosen by `language`
+> in the configuration, English unless set. What the agent is told stays in
+> English: the model reads it and answers in the person's language. The policy
+> engine's reason under an approval is still its own English sentence.
 
 **5. Notes.** `remember` and `forget` are tools; notes live in the database and
 are composed into the agent's prompt at every wake. Writing one is a write, so

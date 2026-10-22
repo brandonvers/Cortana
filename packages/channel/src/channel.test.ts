@@ -6,6 +6,7 @@ import { recordingLogger } from '@cortana/core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { approvalThrough, questionFor } from './approval.ts';
 import { connect } from './client.ts';
+import { LANGUAGES, PHRASES } from './phrases.ts';
 import { MAX_FRAME_BYTES, parseClientFrame } from './protocol.ts';
 import {
   type Channel,
@@ -324,6 +325,59 @@ describe('turning a decision into a question for a person', () => {
         },
       ),
     ).resolves.toBe(false);
+  });
+});
+
+describe('what the system says, in each language', () => {
+  it('has every sentence in every language', () => {
+    const english = Object.keys(PHRASES.en).sort();
+    for (const language of LANGUAGES) {
+      expect(Object.keys(PHRASES[language]).sort()).toEqual(english);
+    }
+  });
+
+  it('asks in Hungarian with the tool, the whole path and the network named', () => {
+    const write = questionFor(
+      { tool: 'Write', path: '/srv/work/out/a.md', writes: true },
+      PHRASES.hu,
+    );
+    const fetch = questionFor({ tool: 'WebFetch', network: true }, PHRASES.hu);
+
+    expect(write).toContain('írni');
+    expect(write).toContain('Write');
+    expect(write).toContain('/srv/work/out/a.md');
+    expect(write).toMatch(/Engedélyezed\?$/);
+    expect(fetch).toContain('hálózatot');
+    expect(fetch).not.toContain('undefined');
+  });
+
+  it('puts the question to the person in their language', async () => {
+    const asked: string[] = [];
+    const approve = approvalThrough(
+      {
+        ask: async (question) => {
+          asked.push(question);
+          return true;
+        },
+      },
+      PHRASES.hu,
+    );
+
+    await approve(
+      { tool: 'Write', path: '/srv/a', writes: true },
+      { verdict: 'ask', because: 'x' },
+    );
+
+    expect(asked).toEqual([PHRASES.hu.question({ tool: 'Write', path: '/srv/a', writes: true })]);
+  });
+
+  it('says a refused file in Hungarian when it knows why, and in the store’s words otherwise', () => {
+    expect(PHRASES.hu.fileRefused('media-too-large', 'too large')).toContain('túl nagy');
+    expect(PHRASES.hu.fileRefused('media-not-an-image', 'not an image')).toContain('kép');
+    expect(PHRASES.hu.fileRefused('something-new', 'the store said this')).toBe(
+      'the store said this',
+    );
+    expect(PHRASES.en.fileRefused('media-too-large', 'too large')).toBe('too large');
   });
 });
 

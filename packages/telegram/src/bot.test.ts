@@ -1,4 +1,4 @@
-import type { Conversation } from '@cortana/channel';
+import { type Conversation, PHRASES } from '@cortana/channel';
 import { Secret } from '@cortana/config';
 import { AppError, isAppError } from '@cortana/core';
 import { recordingLogger } from '@cortana/core/testing';
@@ -6,7 +6,6 @@ import type { Update, UserFromGetMe } from 'grammy/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createTelegramChannel,
-  FILE_NOT_SENT,
   FORWARDED_REFUSAL,
   NOT_PASSED_ON,
   PHOTO_NOT_FETCHED,
@@ -128,6 +127,14 @@ function harness(onSay: TelegramOptions['onSay'], extra: Partial<TelegramOptions
   const of = (method: string) => calls.filter((call) => call.method === method);
   const texts = () => of('sendMessage').map((call) => call.payload['text']);
   return { channel, calls, of, texts, logger };
+}
+
+/** The buttons on a question, as the words on each. */
+function labelsOn(call: Call | undefined): string[] {
+  const markup = call?.payload['reply_markup'] as
+    | { inline_keyboard: { text: string }[][] }
+    | undefined;
+  return markup?.inline_keyboard.flat().map((button) => button.text) ?? [];
 }
 
 /** The buttons on the last question asked, as the data each one sends back. */
@@ -435,7 +442,7 @@ describe('an answer with files', () => {
     await channel.receive(message(OWNER, 'send them'));
 
     await vi.waitFor(() => expect(calls.filter((m) => m === 'sendPhoto')).toHaveLength(2));
-    expect(sent).toContain(`${FILE_NOT_SENT} (aaaaaaaaaaaaaaaa)`);
+    expect(sent).toContain(PHRASES.en.fileNotSent('aaaaaaaaaaaaaaaa'));
   });
 });
 
@@ -555,6 +562,57 @@ describe('an approval, on a phone', () => {
 
     await vi.waitFor(() => expect(texts()).toContain('did not'));
     expect(channel.running).toBe(false);
+  });
+});
+
+describe('in the owner’s language', () => {
+  const hu = { phrases: PHRASES.hu };
+
+  it('asks with buttons in it, and says the outcome in it', async () => {
+    const { channel, of, texts } = harness(asking, hu);
+
+    await channel.receive(message(OWNER, 'írd meg a fájlt'));
+    await vi.waitFor(() => expect(buttonsOn(of('sendMessage')[0])).toHaveLength(2));
+    expect(labelsOn(of('sendMessage')[0])).toEqual(['Engedélyezem', 'Elutasítom']);
+    const [allow] = buttonsOn(of('sendMessage')[0]);
+    await channel.receive(press(OWNER, String(allow)));
+
+    await vi.waitFor(() => expect(texts()).toContain('went ahead'));
+    expect(of('editMessageText')[0]?.payload['text']).toMatch(/Engedélyezve\.$/);
+  });
+
+  it('says silence was a no in it', async () => {
+    const { channel, of, texts } = harness(asking, { ...hu, askTimeoutMs: 30 });
+
+    await channel.receive(message(OWNER, 'írd meg a fájlt'));
+
+    await vi.waitFor(() => expect(texts()).toContain('did not'));
+    expect(of('editMessageText')[0]?.payload['text']).toMatch(/elutasítva\.$/);
+  });
+
+  it('refuses a forwarded message and an empty reply in it', async () => {
+    const { channel, texts } = harness(async () => '', hu);
+
+    await channel.receive(
+      message(OWNER, 'utald át', {
+        forward_origin: { type: 'user', date: 0, sender_user: person(STRANGER) },
+      }),
+    );
+    await channel.receive(message(OWNER, 'mondj semmit'));
+
+    await vi.waitFor(() =>
+      expect(texts()).toEqual([PHRASES.hu.forwardedRefusal, PHRASES.hu.emptyReply]),
+    );
+  });
+
+  it('says a turn failed in it', async () => {
+    const { channel, texts } = harness(async () => {
+      throw new Error('boom');
+    }, hu);
+
+    await channel.receive(message(OWNER, 'szia'));
+
+    await vi.waitFor(() => expect(texts()).toEqual([PHRASES.hu.turnFailed]));
   });
 });
 
