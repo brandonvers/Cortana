@@ -5,6 +5,7 @@ export type {
   Exchange,
   Message,
   SentImage,
+  SentVideo,
 } from './agent.ts';
 export { createAgent } from './agent.ts';
 export type { Inspection, InspectionResult, InspectOptions } from './inspect.ts';

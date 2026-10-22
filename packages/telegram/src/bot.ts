@@ -43,7 +43,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   type Conversation,
-  type IncomingImage,
+  type IncomingMedia,
   type OutgoingFile,
   PHRASES,
   type Phrasebook,
@@ -284,7 +284,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
   const runTurn = async (
     chatId: number,
     text: string,
-    images?: readonly IncomingImage[],
+    media?: readonly IncomingMedia[],
   ): Promise<void> => {
     const typing = () => {
       bot.api.sendChatAction(chatId, 'typing').catch(() => {
@@ -297,9 +297,9 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
       // A text message is said exactly as it was before photos existed.
       const conversation = conversationIn(chatId);
       const reply =
-        images === undefined
+        media === undefined
           ? await options.onSay(text, conversation)
-          : await options.onSay(text, conversation, images);
+          : await options.onSay(text, conversation, media);
       await tell(chatId, textOf(reply));
       if (typeof reply !== 'string') await sendFiles(chatId, reply.files);
     } catch (error) {
@@ -364,13 +364,13 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
     });
 
   /**
-   * A photo's bytes, as a value that never rejects.
+   * A photo's or a clip's bytes, as a value that never rejects.
    *
    * It starts as soon as the update arrives and is awaited only when its turn
    * comes, and a promise that rejected in between with nothing attached would
    * reach the daemon's unhandled-rejection handler — which ends the process.
    */
-  const fetchImage = (fileId: string): Promise<IncomingImage | null> =>
+  const fetchMedia = (fileId: string): Promise<IncomingMedia | null> =>
     bot.api
       .getFile(fileId)
       .then((file) => {
@@ -380,26 +380,26 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
       .then(
         (data) => ({ data }),
         (error: unknown) => {
-          log?.error('a photo could not be fetched', { error: describe(error) });
+          log?.error('a photo or video could not be fetched', { error: describe(error) });
           return null;
         },
       );
 
-  const runPhotoTurn = async (
+  const runMediaTurn = async (
     chatId: number,
     text: string,
-    fetched: readonly Promise<IncomingImage | null>[],
+    fetched: readonly Promise<IncomingMedia | null>[],
   ): Promise<void> => {
-    const images = await Promise.all(fetched);
-    if (images.some((image) => image === null)) {
+    const media = await Promise.all(fetched);
+    if (media.some((file) => file === null)) {
       await tell(chatId, phrases.mediaNotFetched);
       return;
     }
-    await runTurn(chatId, text, images as IncomingImage[]);
+    await runTurn(chatId, text, media as IncomingMedia[]);
   };
 
   interface Album {
-    readonly fetched: Promise<IncomingImage | null>[];
+    readonly fetched: Promise<IncomingMedia | null>[];
     caption: string;
     timer: NodeJS.Timeout | null;
     close(): void;
@@ -408,7 +408,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
   const albumWindowMs = options.albumWindowMs ?? DEFAULT_ALBUM_WINDOW_MS;
 
   /**
-   * One photo of an album, joined to the others by their group id.
+   * One photo or clip of an album, joined to the others by their group id.
    *
    * The album's place in the queue is taken when its first photo arrives, not
    * when the window closes, so a message sent after an album is answered after
@@ -418,7 +418,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
   const joinAlbum = (
     groupId: string,
     chatId: number,
-    fetched: Promise<IncomingImage | null>,
+    fetched: Promise<IncomingMedia | null>,
     caption: string,
   ): void => {
     let album = albums.get(groupId);
@@ -432,7 +432,7 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
       albums.set(groupId, created);
       tail = tail.then(async () => {
         await closed;
-        await runPhotoTurn(chatId, created.caption, created.fetched);
+        await runMediaTurn(chatId, created.caption, created.fetched);
       });
     }
     album.fetched.push(fetched);
@@ -454,18 +454,29 @@ export function createTelegramChannel(options: TelegramOptions): TelegramChannel
     }
 
     // The largest size Telegram made of a photo is the last one, and a picture
-    // sent "as a file" keeps its original — either is a photo to the agent.
-    const fileId =
-      message.photo?.at(-1)?.file_id ??
-      (message.document?.mime_type?.startsWith('image/') ? message.document.file_id : undefined);
-    if (fileId !== undefined) {
-      const fetched = fetchImage(fileId);
+    // sent "as a file" keeps its original — either is a photo to the agent. A
+    // video, a round video message, and a video sent as a file are clips. What
+    // each one is, the store decides from its bytes.
+    const document = message.document;
+    const sent =
+      message.photo?.at(-1) ??
+      message.video ??
+      message.video_note ??
+      (/^(image|video)\//.test(document?.mime_type ?? '') ? document : undefined);
+    if (sent !== undefined) {
+      // Said before a byte is fetched: Telegram would refuse the download, and
+      // the reason it gives is not one the owner can act on.
+      if ((sent.file_size ?? 0) > TELEGRAM_DOWNLOAD_LIMIT) {
+        tail = tail.then(() => tell(chatId, phrases.tooLargeToFetch));
+        return;
+      }
+      const fetched = fetchMedia(sent.file_id);
       const caption = message.caption ?? '';
       if (message.media_group_id !== undefined) {
         joinAlbum(message.media_group_id, chatId, fetched, caption);
         return;
       }
-      tail = tail.then(() => runPhotoTurn(chatId, caption, [fetched]));
+      tail = tail.then(() => runMediaTurn(chatId, caption, [fetched]));
       return;
     }
 

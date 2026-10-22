@@ -105,6 +105,8 @@ export interface KernelOptions {
   readonly telegramRetryMs?: number;
   /** What the kernel can do for the agent; see `actions.ts`. */
   readonly actions?: ConversationOptions['actions'];
+  /** The machine's video tools, for looking at a clip someone sent. */
+  readonly toolkit?: ConversationOptions['toolkit'];
 }
 
 export interface RunningKernel {
@@ -247,6 +249,7 @@ export async function startKernel(options: KernelOptions): Promise<RunningKernel
     ...(options.openTelegram === undefined ? {} : { openTelegram: options.openTelegram }),
     ...(options.telegramRetryMs === undefined ? {} : { telegramRetryMs: options.telegramRetryMs }),
     ...(options.actions === undefined ? {} : { actions: options.actions }),
+    ...(options.toolkit === undefined ? {} : { toolkit: options.toolkit }),
   });
 
   const lifecycle = createLifecycle({

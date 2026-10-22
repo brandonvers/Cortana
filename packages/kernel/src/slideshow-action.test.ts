@@ -75,7 +75,7 @@ async function ask(id: string, kit: Toolkit, reply = 'Here is your video.') {
             writes: false,
             network: false,
             why: 'the person asked for a video',
-            input: JSON.stringify({ photos: [{ id, seconds: 1.5, caption: 'Vízpumpa kész' }] }),
+            input: JSON.stringify({ slides: [{ id, seconds: 1.5, caption: 'Vízpumpa kész' }] }),
           },
         ],
       },
@@ -112,7 +112,11 @@ describe.skipIf(toolkit.ffmpeg === null || toolkit.font === null)('a video asked
 
 describe('a video that cannot be made here', () => {
   it('reaches the agent as a sentence it can tell the person', async () => {
-    const { runner } = await ask('0123456789abcdef', { ffmpeg: null, font: null }, 'Sorry.');
+    const { runner } = await ask(
+      '0123456789abcdef',
+      { ffmpeg: null, ffprobe: null, font: null },
+      'Sorry.',
+    );
 
     expect(runner.turns[1]?.prompt).toContain(
       'make_slideshow: not done — this machine has no ffmpeg that can draw captions',
@@ -121,29 +125,30 @@ describe('a video that cannot be made here', () => {
 });
 
 describe('what the action takes', () => {
-  const schema = slideshowAction({ ffmpeg: null, font: null }).schema;
+  const schema = slideshowAction({ ffmpeg: null, ffprobe: null, font: null }).schema;
   const photo = (seconds: number) => ({ id: '0123456789abcdef', seconds, caption: '' });
 
   it('fills in a duration and an empty caption when they are left out', () => {
-    expect(schema.parse({ photos: [{ id: '0123456789abcdef' }] })).toEqual({
-      photos: [{ id: '0123456789abcdef', seconds: 3, caption: '' }],
+    expect(schema.parse({ slides: [{ id: '0123456789abcdef' }] })).toEqual({
+      slides: [{ id: '0123456789abcdef', seconds: 3, caption: '', from: 0 }],
     });
   });
 
-  it('refuses a clip longer than two minutes, or a photo shown for too long', () => {
-    expect(schema.safeParse({ photos: Array.from({ length: 13 }, () => photo(10)) }).success).toBe(
+  it('refuses a video longer than two minutes, or a slide longer than a clip may be', () => {
+    expect(schema.safeParse({ slides: Array.from({ length: 13 }, () => photo(10)) }).success).toBe(
       false,
     );
-    expect(schema.safeParse({ photos: [photo(11)] }).success).toBe(false);
+    expect(schema.safeParse({ slides: [photo(31)] }).success).toBe(false);
+    expect(schema.safeParse({ slides: [{ ...photo(3), from: -1 }] }).success).toBe(false);
   });
 
   it('refuses anything that is not an id as it was given', () => {
-    expect(schema.safeParse({ photos: [{ id: '../../etc/passwd' }] }).success).toBe(false);
-    expect(schema.safeParse({ photos: [] }).success).toBe(false);
+    expect(schema.safeParse({ slides: [{ id: '../../etc/passwd' }] }).success).toBe(false);
+    expect(schema.safeParse({ slides: [] }).success).toBe(false);
   });
 
   it('declares that it writes nothing that existed and reaches no network', () => {
-    const action = slideshowAction({ ffmpeg: null, font: null });
+    const action = slideshowAction({ ffmpeg: null, ffprobe: null, font: null });
     expect({ writes: action.writes, network: action.network }).toEqual({
       writes: false,
       network: false,

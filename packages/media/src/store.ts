@@ -1,8 +1,8 @@
 /**
  * The files the system holds, named by id.
  *
- * A photo the owner sent, and — from a later step — a video the system made,
- * live here and nowhere else, and everything that refers to one does so by its
+ * A photo or a clip the owner sent, and a video the system made, live here
+ * and nowhere else, and everything that refers to one does so by its
  * id. Nothing that a model writes is ever turned into a path: a tool takes ids
  * and returns ids, an attachment is an id, and an id the store does not hold
  * is refused. [ADR-0021](../../../docs/adr/0021-containment-is-an-allowlist-applied-to-every-call.md)
@@ -20,7 +20,9 @@
  *
  * Not from the name, and not from what the sender declared. A file is accepted
  * as an image only when its first bytes say it is one of the four kinds the
- * provider takes, and it is stored and described as what it is.
+ * provider takes, as a video only when they say it is an MP4 (or the QuickTime
+ * file a phone records, which is the same container), and it is stored and
+ * described as what it is.
  */
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -41,7 +43,10 @@ export type ImageType = (typeof IMAGE_TYPES)[number];
  */
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-/** A video the system made. Only ever made here, never accepted from outside. */
+/**
+ * A video: one the system made, or a clip the owner sent. Either is kept as an
+ * MP4 container, and only system code ever opens one — a model is shown frames.
+ */
 export const VIDEO_TYPE = 'video/mp4';
 export type MediaType = ImageType | typeof VIDEO_TYPE;
 
@@ -76,11 +81,13 @@ export interface StoredImage extends StoredMedia {
 export interface MediaStore {
   /** Keeps an image and says what it is. The same bytes twice are one file. */
   put(data: Uint8Array): StoredImage;
-  /**
-   * Keeps a video the system made. Separate from `put` so that nothing arriving
-   * from outside — where only images are accepted — can be kept as a video.
-   */
+  /** Keeps a video. Separate from `put` because only an image can be shown to a model. */
   putVideo(data: Uint8Array): StoredMedia;
+  /**
+   * Keeps what a person sent — an image or a video, by its first bytes — or
+   * refuses it in a sentence. Anything else is neither, whatever it was called.
+   */
+  accept(data: Uint8Array): StoredMedia;
   /**
    * Where a held file is on this machine, for system code handing it to a
    * program such as `ffmpeg`. Never shown to a model: a model names files by
@@ -110,6 +117,14 @@ export function sniffImage(data: Uint8Array): ImageType | null {
     return 'image/webp';
   }
   return null;
+}
+
+/**
+ * Whether these bytes are an MP4 — or a phone's QuickTime file, the same
+ * container — which says so four bytes in: a box called `ftyp`.
+ */
+export function sniffVideo(data: Uint8Array): boolean {
+  return data[4] === 0x66 && data[5] === 0x74 && data[6] === 0x79 && data[7] === 0x70;
 }
 
 const ID = /^[0-9a-f]{16}$/;
@@ -148,7 +163,7 @@ export function createMediaStore(options: { readonly dir: string }): MediaStore 
     renameSync(partial, final);
   };
 
-  return {
+  const store: MediaStore = {
     put(data) {
       const mediaType = sniffImage(data);
       if (mediaType === null) {
@@ -169,9 +184,7 @@ export function createMediaStore(options: { readonly dir: string }): MediaStore 
     },
 
     putVideo(data) {
-      // An MP4 says so four bytes in: a box called `ftyp`.
-      const isMp4 = data[4] === 0x66 && data[5] === 0x74 && data[6] === 0x79 && data[7] === 0x70;
-      if (!isMp4) {
+      if (!sniffVideo(data)) {
         throw new AppError('this is not an MP4 video', {
           category: 'contract',
           code: 'media-not-a-video',
@@ -186,6 +199,15 @@ export function createMediaStore(options: { readonly dir: string }): MediaStore 
       }
       keep(data, VIDEO_TYPE);
       return describe(data, VIDEO_TYPE);
+    },
+
+    accept(data) {
+      if (sniffImage(data) !== null) return store.put(data);
+      if (sniffVideo(data)) return store.putVideo(data);
+      throw new AppError(
+        'this is not a photo or a video the system can use (JPEG, PNG, WebP, GIF, MP4 or MOV)',
+        { category: 'contract', code: 'media-not-supported', detail: { bytes: data.length } },
+      );
     },
 
     localPath(id) {
@@ -210,4 +232,5 @@ export function createMediaStore(options: { readonly dir: string }): MediaStore 
       return readFileSync(found.path);
     },
   };
+  return store;
 }

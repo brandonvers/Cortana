@@ -1,12 +1,15 @@
 /**
- * Photos into a vertical video: one after another, each for a few seconds,
- * each with an optional caption — assembled by `ffmpeg`, and nothing more.
+ * Photos and clips into a vertical video: one after another, each for a few
+ * seconds, each with an optional caption — assembled by `ffmpeg`, and nothing
+ * more.
  *
- * What a finished clip is was decided at the start: assembly from stills the
- * owner took, captions over them, and no sound — sound is added on the
- * platform. 1080×1920 at 30 frames a second, H.264, which every short-video
- * platform takes as it is. A photo that is not 9:16 sits whole in the middle,
- * over a blurred, enlarged copy of itself, rather than being cropped.
+ * What a finished video is was decided at the start: assembly from what the
+ * owner shot, captions over it, and no sound — sound is added on the platform,
+ * so a clip's own is dropped. 1080×1920 at 30 frames a second, H.264, which
+ * every short-video platform takes as it is. A photo or clip that is not 9:16
+ * sits whole in the middle, over a blurred, enlarged copy of itself, rather
+ * than being cropped. A clip is cut: a stretch of it, from a given second, for
+ * the slide's seconds.
  *
  * ## Nothing a model wrote reaches a command line
  *
@@ -14,7 +17,7 @@
  * quotes, brackets and backslashes as structure. So a caption never enters the
  * arguments: each one is written to its own file and `drawtext` reads it with
  * `textfile=`, with `expansion=none` so that a `%{…}` in the words stays words.
- * The photos are named by id and turned into paths by the store, the font and
+ * The photos and clips are named by id and turned into paths by the store, the font and
  * the caption files live in a directory this function made, and the arguments
  * are built by a pure function a test reads — so "no model text in argv" is a
  * property checked on every run, not a promise.
@@ -30,13 +33,18 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { AppError } from '@cortana/core';
-import type { MediaStore, StoredMedia } from './store.ts';
+import { type MediaStore, type StoredMedia, VIDEO_TYPE } from './store.ts';
+import { measureVideo } from './video.ts';
 
 export const WIDTH = 1080;
 export const HEIGHT = 1920;
 const FPS = 30;
+
+/** The longest a photo is held, and the longest stretch of one clip, in seconds. */
+export const MAX_PHOTO_SECONDS = 10;
+export const MAX_CLIP_SECONDS = 30;
 
 /** How long one `ffmpeg` run may take before it is stopped. */
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -46,18 +54,25 @@ const LINE_WIDTH = 22;
 const MAX_LINES = 4;
 
 export interface Slide {
-  /** A held image, by id. */
+  /** A held image or video, by id. */
   readonly id: string;
   readonly seconds: number;
-  /** Drawn over the lower part of the photo. Empty for none. */
+  /** Drawn over the lower part of the frame. Empty for none. */
   readonly caption: string;
+  /** For a clip, the second its stretch starts at. Ignored for a photo. */
+  readonly from?: number;
 }
 
-/** One slide as `ffmpeg` is handed it: a path, a duration, and a caption file or none. */
+/**
+ * One slide as `ffmpeg` is handed it: a path, a duration, a caption file or
+ * none — and, for a clip, where in it to start.
+ */
 export interface PlannedSlide {
   readonly path: string;
   readonly seconds: number;
   readonly captionFile: string | null;
+  /** Set for a clip, and only for one: the second its stretch starts at. */
+  readonly from?: number;
 }
 
 /**
@@ -116,25 +131,21 @@ function filterPath(path: string): string {
 /**
  * The arguments for one run, as a pure function a test can read.
  *
- * Every photo is its own looped input, scaled whole into the frame over a
- * blurred copy that fills it, given its caption, and the slides are joined in
- * order.
+ * Every photo is its own looped input and every clip its own cut one, each
+ * scaled whole into the frame over a blurred copy that fills it, given its
+ * caption, and the slides are joined in order. Only video is mapped out, so a
+ * clip's sound goes nowhere.
  */
 export function slideshowArgs(
   slides: readonly PlannedSlide[],
   font: string | null,
   out: string,
 ): string[] {
-  const inputs = slides.flatMap((slide) => [
-    '-loop',
-    '1',
-    '-framerate',
-    String(FPS),
-    '-t',
-    slide.seconds.toFixed(2),
-    '-i',
-    slide.path,
-  ]);
+  const inputs = slides.flatMap((slide) =>
+    slide.from === undefined
+      ? ['-loop', '1', '-framerate', String(FPS), '-t', slide.seconds.toFixed(2), '-i', slide.path]
+      : ['-ss', slide.from.toFixed(2), '-t', slide.seconds.toFixed(2), '-i', slide.path],
+  );
 
   const chains = slides.map((slide, at) => {
     const steps = [
@@ -188,6 +199,8 @@ export function slideshowArgs(
 export interface Toolkit {
   /** An `ffmpeg` that can draw text, or null. */
   readonly ffmpeg: string | null;
+  /** The `ffprobe` beside it, which measures a clip, or null. */
+  readonly ffprobe: string | null;
   /** A bold font with the accents Hungarian needs, or null. */
   readonly font: string | null;
 }
@@ -236,12 +249,29 @@ export function findToolkit(
     }
   }
   const font = FONT_CANDIDATES.find((path) => existsSync(path)) ?? null;
-  return { ffmpeg, font };
+  return { ffmpeg, ffprobe: ffprobeBeside(ffmpeg), font };
 }
 
 /**
- * The slides as `ffmpeg` will be handed them: each photo's path, and each
- * caption written — wrapped — to its own file in `work`.
+ * The `ffprobe` that came with this `ffmpeg`: the same directory, or the
+ * search path when `ffmpeg` was found there. A different build's would measure
+ * the same file, but one install is one thing to reason about.
+ */
+function ffprobeBeside(ffmpeg: string | null): string | null {
+  if (ffmpeg === null) return null;
+  const candidate = ffmpeg.includes('/') ? join(dirname(ffmpeg), 'ffprobe') : 'ffprobe';
+  try {
+    execFileSync(candidate, ['-version'], { stdio: 'ignore', timeout: 10_000 });
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The slides as `ffmpeg` will be handed them: each photo's or clip's path,
+ * where a clip starts, and each caption written — wrapped — to its own file in
+ * `work`.
  *
  * Separate so that what a caption file holds can be checked: an unwrapped
  * caption still makes a video, and runs off the edge of it.
@@ -257,7 +287,11 @@ export function planSlides(
       captionFile = join(work, `caption-${at}.txt`);
       writeFileSync(captionFile, wrapCaption(slide.caption), 'utf8');
     }
-    return { path: store.localPath(slide.id) as string, seconds: slide.seconds, captionFile };
+    const path = store.localPath(slide.id) as string;
+    // A clip by what the store holds it as, never by whether `from` was given.
+    return store.get(slide.id)?.mediaType === VIDEO_TYPE
+      ? { path, seconds: slide.seconds, captionFile, from: slide.from ?? 0 }
+      : { path, seconds: slide.seconds, captionFile };
   });
 }
 
@@ -283,14 +317,47 @@ export async function makeSlideshow(options: {
       'slideshow-no-ffmpeg',
     );
   }
-  const unknown = slides.filter(
-    (slide) => store.get(slide.id)?.mediaType.startsWith('image/') !== true,
-  );
+  const unknown = slides.filter((slide) => store.localPath(slide.id) === null);
   if (unknown.length > 0) {
     throw refuse(
-      `there is no photo held as ${unknown.map((slide) => slide.id).join(', ')}`,
-      'slideshow-unknown-photo',
+      `there is no photo or clip held as ${unknown.map((slide) => slide.id).join(', ')}`,
+      'slideshow-unknown-file',
     );
+  }
+  // A stretch past a clip's end would make a shorter video than the one the
+  // agent described, silently. Measured, and said with the clip's length, so
+  // the agent can ask again with a stretch that fits.
+  for (const slide of slides) {
+    if (store.get(slide.id)?.mediaType !== VIDEO_TYPE) {
+      if (slide.seconds > MAX_PHOTO_SECONDS) {
+        throw refuse(
+          `a photo is shown for at most ${MAX_PHOTO_SECONDS} seconds, and ${slide.id} was given ${slide.seconds}`,
+          'slideshow-photo-too-long',
+        );
+      }
+      continue;
+    }
+    if (slide.seconds > MAX_CLIP_SECONDS) {
+      throw refuse(
+        `one stretch of a clip is at most ${MAX_CLIP_SECONDS} seconds, and ${slide.id} was given ${slide.seconds}`,
+        'slideshow-clip-too-long',
+      );
+    }
+    if (toolkit.ffprobe === null) {
+      throw refuse(
+        'this machine has no ffprobe to measure a clip with, so clips cannot be used here',
+        'slideshow-no-ffprobe',
+      );
+    }
+    const length = await measureVideo(toolkit, store.localPath(slide.id) as string);
+    const from = slide.from ?? 0;
+    if (from + slide.seconds > length + 0.05) {
+      throw refuse(
+        `the clip ${slide.id} is ${length.toFixed(1)} seconds long, so it has no ` +
+          `${slide.seconds} seconds starting at ${from} s`,
+        'slideshow-clip-too-short',
+      );
+    }
   }
   const captioned = slides.some((slide) => slide.caption.trim() !== '');
   if (captioned && toolkit.font === null) {

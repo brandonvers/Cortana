@@ -38,14 +38,20 @@
 
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { type Agent, composePrompt, createAgent, type SentImage } from '@cortana/agent';
+import {
+  type Agent,
+  composePrompt,
+  createAgent,
+  type SentImage,
+  type SentVideo,
+} from '@cortana/agent';
 import { auditedRunner } from '@cortana/audit';
 import {
   approvalThrough,
   type Channel,
   type Conversation,
   createChannel,
-  type IncomingImage,
+  type IncomingMedia,
   type OutgoingFile,
   PHRASES,
   type Phrasebook,
@@ -53,7 +59,14 @@ import {
 } from '@cortana/channel';
 import type { Config } from '@cortana/config';
 import { AppError, type InstanceId, isAppError, type Logger } from '@cortana/core';
-import { createMediaStore, type MediaStore } from '@cortana/media';
+import {
+  createMediaStore,
+  lookAtVideo,
+  type MediaStore,
+  type StoredMedia,
+  type Toolkit,
+  VIDEO_TYPE,
+} from '@cortana/media';
 import { workingProfile } from '@cortana/policy';
 import type { ModelRunner } from '@cortana/runner';
 import type { Storage, Writer } from '@cortana/storage';
@@ -109,6 +122,11 @@ export interface ConversationOptions {
   readonly telegramRetryMs?: number;
   /** What the kernel can do for the agent. Only those the configuration names are offered. */
   readonly actions?: readonly KernelAction[];
+  /**
+   * The machine's `ffmpeg` and `ffprobe`, for looking at a clip someone sent.
+   * Absent, a clip is still kept and passed on by id, unseen.
+   */
+  readonly toolkit?: Toolkit;
 }
 
 export interface ConversationParts {
@@ -352,20 +370,45 @@ export function conversationComponents(options: ConversationOptions): Conversati
     return files.length === 0 ? `${reply}${note}` : { text: `${reply}${note}`, files };
   };
 
+  /**
+   * A clip, as the agent is shown it: its length and frames from it. A machine
+   * that cannot look at one still passes the clip on — named, and with the
+   * agent told it has not seen it — because a clip is usable by id unseen.
+   */
+  const lookedAt = async (id: string): Promise<SentVideo> => {
+    const toolkit = options.toolkit;
+    const path = store().localPath(id);
+    if (toolkit === undefined || path === null) return { id, seconds: null, frames: [] };
+    try {
+      const look = await lookAtVideo(toolkit, path);
+      return {
+        id,
+        seconds: look.seconds,
+        frames: look.frames.map((frame) => ({
+          at: frame.at,
+          image: { mediaType: 'image/jpeg', data: frame.data },
+        })),
+      };
+    } catch (error) {
+      log.warn('a clip could not be looked at, and is passed on unseen', {
+        id,
+        reason: isAppError(error) ? error.message : String(error),
+      });
+      return { id, seconds: null, frames: [] };
+    }
+  };
+
   const answer = async (
     text: string,
     conversation: Conversation,
-    images?: readonly IncomingImage[],
+    media?: readonly IncomingMedia[],
   ): Promise<string | Reply> => {
     // Kept before the turn, so the agent is handed ids the store already holds.
-    // A file the store refuses — not an image, or too large to show — is the
-    // person's to hear about, in the store's own words, and no turn is spent.
-    let sent: SentImage[] = [];
+    // A file the store refuses — neither a photo nor a clip, or too large — is
+    // the person's to hear about, and no turn is spent.
+    let held: { readonly stored: StoredMedia; readonly data: Uint8Array }[] = [];
     try {
-      sent = (images ?? []).map((image) => {
-        const held = store().put(image.data);
-        return { id: held.id, mediaType: held.mediaType, data: image.data };
-      });
+      held = (media ?? []).map((file) => ({ stored: store().accept(file.data), data: file.data }));
     } catch (error) {
       if (isAppError(error) && error.category === 'contract') {
         return phrases.fileRefused(error.code, error.message);
@@ -373,13 +416,19 @@ export function conversationComponents(options: ConversationOptions): Conversati
       throw error;
     }
 
-    if (sent.length === 0 && text.trim() === NEW_CONVERSATION) {
+    if (held.length === 0 && text.trim() === NEW_CONVERSATION) {
       await startOver();
       log.info('a new conversation was asked for');
       return phrases.startedOver;
     }
 
-    const message = sent.length === 0 ? text : { text, images: sent };
+    const images: SentImage[] = [];
+    const videos: SentVideo[] = [];
+    for (const { stored, data } of held) {
+      if (stored.mediaType === VIDEO_TYPE) videos.push(await lookedAt(stored.id));
+      else images.push({ id: stored.id, mediaType: stored.mediaType, data });
+    }
+    const message = held.length === 0 ? text : { text, images, videos };
     const turn = async (): Promise<string | Reply> => {
       const talking = await ensureAgent();
       // The approver is whoever is on *this* connection, for this turn. An
@@ -507,7 +556,7 @@ interface TelegramParts {
   readonly answer: (
     text: string,
     conversation: Conversation,
-    images?: readonly IncomingImage[],
+    media?: readonly IncomingMedia[],
   ) => Promise<string | Reply>;
   readonly log: Logger;
   readonly readCredential?: ReadCredential;

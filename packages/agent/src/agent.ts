@@ -73,10 +73,24 @@ export interface SentImage extends TurnImage {
   readonly id: string;
 }
 
+/**
+ * A clip the person sent, as the agent is handed it: the id it is held under,
+ * how long it is, and frames from it — a model is shown pictures, never video.
+ * A clip that could not be looked at has no frames, and the model is told it
+ * has not seen it rather than left to guess.
+ */
+export interface SentVideo {
+  readonly id: string;
+  readonly seconds: number | null;
+  readonly frames: readonly { readonly at: number; readonly image: TurnImage }[];
+}
+
 /** A message with something attached to it. */
 export interface Message {
   readonly text: string;
   readonly images: readonly SentImage[];
+  /** Listed after the images, and their frames shown after the images, clip by clip. */
+  readonly videos?: readonly SentVideo[];
 }
 
 /** Everything one `say` produced. */
@@ -278,14 +292,18 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
       });
     }
 
-    const text = withImageList(message);
+    const text = withMediaList(message);
     const prompt = carried === null ? text : `${carried}\n\n${text}`;
     // Cleared before the turn rather than after it. A turn that throws has still
     // delivered the note, and carrying it into the retry as well would tell the
     // model twice about one refusal.
     carried = null;
 
-    const result = await session.turn(prompt, message.images);
+    const shown = [
+      ...message.images,
+      ...(message.videos ?? []).flatMap((video) => video.frames.map((frame) => frame.image)),
+    ];
+    const result = await session.turn(prompt, shown);
 
     // Decided one at a time, and asked about one at a time. `decideForSession`
     // rather than `decide` because the profile's own answer to "should a person
@@ -367,19 +385,47 @@ export async function createAgent(options: AgentOptions): Promise<Agent> {
 }
 
 /**
- * The text of a message, with the images that came with it named after it.
+ * The text of a message, with the images and clips that came with it named
+ * after it.
  *
  * The model sees the pictures themselves; what it cannot see is what the system
  * calls them. Naming them here is what lets the next turn say "the second
  * photo" in a way a tool can act on — the id — rather than a description that
- * has to be matched back to a file by guesswork.
+ * has to be matched back to a file by guesswork. A clip is named as a clip,
+ * with the second each of its frames was taken at, so that the frames are not
+ * mistaken for photos and a stretch of it can be asked for by time.
  */
-function withImageList(message: Message): string {
-  if (message.images.length === 0) return message.text;
-  const list = message.images
-    .map((image, at) => `  ${at + 1}. ${image.id} (${image.mediaType})`)
+function withMediaList(message: Message): string {
+  const videos = message.videos ?? [];
+  if (message.images.length === 0 && videos.length === 0) return message.text;
+  const lines = [
+    ...message.images.map((image) => `${image.id} (${image.mediaType})`),
+    ...videos.map(describeVideo),
+  ]
+    .map((line, at) => `  ${at + 1}. ${line}`)
     .join('\n');
-  const sent = message.images.length === 1 ? 'one image' : `${message.images.length} images`;
-  const text = message.text.trim() === '' ? '(no text, only the images)' : message.text;
-  return `${text}\n\n[Sent with this message: ${sent}, held under these ids:\n${list}]`;
+  const sent = [
+    message.images.length === 0 ? null : counted(message.images.length, 'image', 'images'),
+    videos.length === 0 ? null : counted(videos.length, 'video clip', 'video clips'),
+  ]
+    .filter((part) => part !== null)
+    .join(' and ');
+  const only = videos.length === 0 ? 'the images' : 'what is attached';
+  const text = message.text.trim() === '' ? `(no text, only ${only})` : message.text;
+  return `${text}\n\n[Sent with this message: ${sent}, held under these ids:\n${lines}]`;
+}
+
+const counted = (count: number, one: string, many: string): string =>
+  count === 1 ? `one ${one}` : `${count} ${many}`;
+
+function describeVideo(video: SentVideo): string {
+  const length = video.seconds === null ? '' : `, ${video.seconds.toFixed(1)} s long`;
+  if (video.frames.length === 0) {
+    return `${video.id} (video/mp4, a clip${length} — it could not be looked at here, so you have not seen it)`;
+  }
+  const times = video.frames.map((frame) => frame.at.toFixed(1)).join(', ');
+  return (
+    `${video.id} (video/mp4, a clip${length} — not a photo: you are shown ` +
+    `${video.frames.length} frames of it, taken at ${times} s, after the photos)`
+  );
 }
