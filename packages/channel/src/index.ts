@@ -9,7 +9,7 @@ export type {
   Channel,
   ChannelOptions,
   Conversation,
-  IncomingImage,
+  IncomingMedia,
   OutgoingFile,
   Reply,
   SayHandler,

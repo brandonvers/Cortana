@@ -355,6 +355,75 @@ describe('a photo', () => {
   });
 });
 
+describe('a video', () => {
+  const said = () =>
+    vi.fn(
+      async (
+        _text: string,
+        _conversation: Conversation,
+        _media?: readonly { data: Uint8Array }[],
+      ) => 'ok',
+    );
+
+  it('reaches the agent the way a photo does, with its caption as the text', async () => {
+    const onSay = said();
+    const { channel } = harness(onSay);
+
+    await channel.receive(
+      message(OWNER, undefined, {
+        video: { file_id: 'clip', file_unique_id: 'c', width: 1080, height: 1920, duration: 6 },
+        caption: 'ezt is',
+      }),
+    );
+
+    await vi.waitFor(() => expect(onSay).toHaveBeenCalled());
+    expect(onSay.mock.calls[0]?.[0]).toBe('ezt is');
+    expect(decoded(onSay.mock.calls[0]?.[2])).toEqual(['photos/clip.jpg']);
+  });
+
+  it('can be a round video message, or a video sent as a file', async () => {
+    const onSay = said();
+    const { channel } = harness(onSay);
+
+    await channel.receive(
+      message(OWNER, undefined, {
+        video_note: { file_id: 'round', file_unique_id: 'r', length: 384, duration: 4 },
+      }),
+    );
+    await channel.receive(
+      message(OWNER, undefined, {
+        document: { file_id: 'mov', file_unique_id: 'm', mime_type: 'video/quicktime' },
+      }),
+    );
+
+    await vi.waitFor(() => expect(onSay).toHaveBeenCalledTimes(2));
+    expect(decoded(onSay.mock.calls[0]?.[2])).toEqual(['photos/round.jpg']);
+    expect(decoded(onSay.mock.calls[1]?.[2])).toEqual(['photos/mov.jpg']);
+  });
+
+  it('says so, without fetching it, when it is more than Telegram lets a bot download', async () => {
+    const onSay = said();
+    const { channel, of, texts } = harness(onSay, { phrases: PHRASES.hu });
+
+    await channel.receive(
+      message(OWNER, undefined, {
+        video: {
+          file_id: 'long',
+          file_unique_id: 'l',
+          width: 1080,
+          height: 1920,
+          duration: 90,
+          file_size: 21 * 1024 * 1024,
+        },
+      }),
+    );
+
+    await vi.waitFor(() => expect(texts()).toEqual([PHRASES.hu.tooLargeToFetch]));
+    expect(of('getFile')).toHaveLength(0);
+    expect(onSay).not.toHaveBeenCalled();
+  });
+});
+
 describe('an album', () => {
   it('is one turn with every photo in it, in the order they came', async () => {
     const onSay = vi.fn(

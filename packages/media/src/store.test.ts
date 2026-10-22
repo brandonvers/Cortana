@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isAppError } from '@cortana/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createMediaStore, MAX_IMAGE_BYTES, sniffImage } from './store.ts';
+import { createMediaStore, MAX_IMAGE_BYTES, sniffImage, sniffVideo } from './store.ts';
 
 let root: string;
 
@@ -20,6 +20,9 @@ const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9]);
 const GIF = Uint8Array.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
 const WEBP = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+/** An MP4's first box, `ftyp`, then its brand — `qt  ` is a phone's QuickTime file. */
+const MP4 = Uint8Array.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+const MOV = Uint8Array.from([0, 0, 0, 0x14, 0x66, 0x74, 0x79, 0x70, 0x71, 0x74, 0x20, 0x20]);
 
 const refusal = (run: () => unknown): string => {
   try {
@@ -45,6 +48,15 @@ describe('what counts as an image', () => {
       sniffImage(Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x41, 0x56, 0x49])),
     ).toBeNull();
     expect(sniffImage(new Uint8Array())).toBeNull();
+  });
+});
+
+describe('what counts as a video', () => {
+  it('is an MP4 or a phone’s QuickTime file, by the box four bytes in', () => {
+    expect(sniffVideo(MP4)).toBe(true);
+    expect(sniffVideo(MOV)).toBe(true);
+    expect(sniffVideo(JPEG)).toBe(false);
+    expect(sniffVideo(new Uint8Array(3))).toBe(false);
   });
 });
 
@@ -88,6 +100,17 @@ describe('the store', () => {
     const huge = new Uint8Array(MAX_IMAGE_BYTES + 1);
     huge.set(JPEG);
     expect(refusal(() => store.put(huge))).toBe('media-too-large');
+  });
+
+  it('accepts what a person sends by its bytes — a photo as an image, a clip as a video', () => {
+    const store = createMediaStore({ dir: join(root, 'media') });
+
+    expect(store.accept(JPEG).mediaType).toBe('image/jpeg');
+    expect(store.accept(MP4).mediaType).toBe('video/mp4');
+    expect(store.accept(MOV).mediaType).toBe('video/mp4');
+    expect(refusal(() => store.accept(new TextEncoder().encode('%PDF-1.7')))).toBe(
+      'media-not-supported',
+    );
   });
 
   it('cannot be walked out of with an id that is a path', () => {

@@ -1,12 +1,13 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { connect, PHRASES, socketPathFor } from '@cortana/channel';
 import { type Config, Secret } from '@cortana/config';
 import { AppError, isAppError } from '@cortana/core';
 import { recordingLogger } from '@cortana/core/testing';
-import { IMAGE_TYPES } from '@cortana/media';
+import { findToolkit, IMAGE_TYPES } from '@cortana/media';
 import { TURN_IMAGE_TYPES } from '@cortana/runner';
 import { fakeRunner } from '@cortana/runner/testing';
 import {
@@ -227,6 +228,24 @@ function photoMessage(fileId: string) {
   } as never;
 }
 
+function videoMessage(fileId: string) {
+  const update = nextUpdate++;
+  return {
+    update_id: update,
+    message: {
+      message_id: update,
+      date: 0,
+      chat: { id: OWNER, type: 'private', first_name: 'owner' },
+      from: { id: OWNER, is_bot: false, first_name: 'owner' },
+      video: { file_id: fileId, file_unique_id: fileId, width: 1080, height: 1920, duration: 6 },
+      caption: 'Ezt is tedd bele',
+    },
+  } as never;
+}
+
+/** An MP4 as far as anything that reads its first bytes is concerned. */
+const MP4 = Uint8Array.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+
 /** A JPEG as far as anything that reads its first bytes is concerned. */
 const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70]);
 
@@ -301,10 +320,85 @@ describe('a photo from the phone', () => {
     await tg.bot.receive(photoMessage('not-a-photo'));
 
     await vi.waitFor(() => expect(tg.sent).toHaveLength(1));
-    expect(tg.sent[0]).toContain('not an image');
+    expect(tg.sent[0]).toContain('not a photo or a video');
     expect(runner.turns).toHaveLength(0);
   });
 });
+
+describe('a clip from the phone', () => {
+  it('is kept, and passed on by id — unseen, and said to be, where nothing can look at it', async () => {
+    const runner = fakeRunner({ values: [answer('Got the clip.')] });
+    const tg = telegram(() => null, { 'clip-1': MP4 });
+    kernel = await startKernel({
+      config,
+      logger: recordingLogger(),
+      version: '0.4.0',
+      openRunner: async () => runner,
+      readCredential: () => token(),
+      openTelegram: tg.open,
+    });
+
+    await tg.bot.receive(videoMessage('clip-1'));
+
+    await vi.waitFor(() => expect(tg.sent).toEqual(['Got the clip.']));
+    const id = createHash('sha256').update(MP4).digest('hex').slice(0, 16);
+    const [turn] = runner.turns;
+    expect(turn?.prompt).toContain('Ezt is tedd bele');
+    expect(turn?.prompt).toContain(`1. ${id} (video/mp4, a clip`);
+    expect(turn?.prompt).toContain('you have not seen it');
+    expect(turn?.images).toEqual([]);
+    expect(readdirSync(join(config.dataDir, 'media'))).toEqual([`${id}.mp4`]);
+  });
+});
+
+const toolkit = findToolkit();
+
+describe.skipIf(toolkit.ffmpeg === null || toolkit.ffprobe === null)(
+  'a real clip from the phone',
+  () => {
+    it('is shown to the agent as frames, after the caption, each one timed', async () => {
+      const file = join(root, 'clip.mp4');
+      execFileSync(toolkit.ffmpeg as string, [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc2=size=360x640:rate=30:duration=6',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-y',
+        file,
+      ]);
+      const runner = fakeRunner({ values: [answer('Látom a klipet.')] });
+      const tg = telegram(() => null, { 'clip-1': readFileSync(file) });
+      kernel = await startKernel({
+        config,
+        logger: recordingLogger(),
+        version: '0.4.0',
+        openRunner: async () => runner,
+        readCredential: () => token(),
+        openTelegram: tg.open,
+        toolkit,
+      });
+
+      await tg.bot.receive(videoMessage('clip-1'));
+
+      await vi.waitFor(() => expect(tg.sent).toEqual(['Látom a klipet.']), { timeout: 20_000 });
+      const [turn] = runner.turns;
+      expect(turn?.images.map((image) => image.mediaType)).toEqual([
+        'image/jpeg',
+        'image/jpeg',
+        'image/jpeg',
+      ]);
+      expect(turn?.prompt).toContain('6.0 s long — not a photo: you are shown 3 frames of it');
+      expect(turn?.prompt).toContain('taken at 1.0, 3.0, 5.0 s');
+    }, 30_000);
+  },
+);
 
 describe('in Hungarian, when the configuration says so', () => {
   it('says what the system itself says in it, and leaves the agent’s words alone', async () => {
@@ -334,7 +428,7 @@ describe('in Hungarian, when the configuration says so', () => {
     await vi.waitFor(() => expect(tg.sent).toHaveLength(4));
 
     expect(tg.sent).toEqual([
-      PHRASES.hu.fileRefused('media-not-an-image', ''),
+      PHRASES.hu.fileRefused('media-not-supported', ''),
       `Itt van.${PHRASES.hu.notHeld(['ffffffffffffffff'])}`,
       // Said by the bot, which the kernel handed the same phrasebook.
       PHRASES.hu.emptyReply,

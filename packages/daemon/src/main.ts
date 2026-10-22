@@ -192,6 +192,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<ExitCode> 
     const toolkit = findToolkit(env);
     logger.info('what this machine can make videos with', {
       ffmpeg: toolkit.ffmpeg ?? '(none that can draw captions)',
+      ffprobe: toolkit.ffprobe ?? '(none, so clips cannot be used)',
       font: toolkit.font ?? '(none)',
     });
     // The rung announced above is the rung read from: the same detection, so
@@ -220,6 +221,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<ExitCode> 
       // configuration names them; listed here so the daemon is where "which
       // actions exist" is answered, as it is for "which provider".
       actions: [slideshowAction(toolkit)],
+      toolkit,
     });
   } catch (error) {
     watch?.dispose();

@@ -146,6 +146,39 @@ describe('a turn', () => {
     expect(prompt).toContain('2. bbbbbbbbbbbbbbbb');
   });
 
+  it('names a clip as a clip, and shows its frames after the photos', async () => {
+    const runner = fakeRunner({ values: [answer('A gearbox, then the car driving off.')] });
+    const agent = await createAgent({ runner, profile: WORKING, persona: 'p' });
+    const image = (byte: number) => ({
+      mediaType: 'image/jpeg' as const,
+      data: Uint8Array.from([0xff, 0xd8, 0xff, byte]),
+    });
+    const photo = { id: 'aaaaaaaaaaaaaaaa', ...image(1) };
+    const frames = [
+      { at: 1.5, image: image(2) },
+      { at: 4.5, image: image(3) },
+    ];
+
+    await agent.say({
+      text: '',
+      images: [photo],
+      videos: [
+        { id: 'bbbbbbbbbbbbbbbb', seconds: 6, frames },
+        { id: 'cccccccccccccccc', seconds: null, frames: [] },
+      ],
+    });
+
+    const [turn] = runner.turns;
+    expect(turn?.images).toEqual([photo, frames[0]?.image, frames[1]?.image]);
+    const prompt = turn?.prompt ?? '';
+    expect(prompt).toContain('(no text, only what is attached)');
+    expect(prompt).toContain('one image and 2 video clips');
+    expect(prompt).toContain('2. bbbbbbbbbbbbbbbb (video/mp4, a clip, 6.0 s long');
+    expect(prompt).toContain('2 frames of it, taken at 1.5, 4.5 s');
+    expect(prompt).toContain('3. cccccccccccccccc');
+    expect(prompt).toContain('you have not seen it');
+  });
+
   it('sends a plain string exactly as before, with no images', async () => {
     const runner = fakeRunner({ values: [answer('ok')] });
     const agent = await createAgent({ runner, profile: WORKING, persona: 'p' });

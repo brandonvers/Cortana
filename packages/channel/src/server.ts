@@ -74,13 +74,14 @@ export interface Conversation {
 }
 
 /**
- * A picture that arrived with a message, before anything has said what it is.
+ * A photo or a clip that arrived with a message, before anything has said what
+ * it is.
  *
- * Bytes and nothing else. A channel knows how a picture travels; deciding what
+ * Bytes and nothing else. A channel knows how a file travels; deciding what
  * kind of file it is, keeping it, and naming it belong to whoever stores it, and
  * a channel that did those would be a channel with an opinion about files.
  */
-export interface IncomingImage {
+export interface IncomingMedia {
   readonly data: Uint8Array;
 }
 
@@ -106,7 +107,7 @@ export interface Reply {
 export type SayHandler = (
   text: string,
   conversation: Conversation,
-  images?: readonly IncomingImage[],
+  media?: readonly IncomingMedia[],
 ) => Promise<string | Reply>;
 
 /** The text of an answer, whichever form it came in. */

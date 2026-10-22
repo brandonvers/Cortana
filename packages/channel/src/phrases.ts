@@ -22,6 +22,8 @@ export interface Phrasebook {
   /** What was sent that is not passed on: voice, and files that are not media. */
   readonly notPassedOn: string;
   readonly mediaNotFetched: string;
+  /** A file over what Telegram lets a bot download. */
+  readonly tooLargeToFetch: string;
   readonly turnFailed: string;
   readonly fileNotSent: (id: string) => string;
   readonly emptyReply: string;
@@ -46,10 +48,13 @@ const en: Phrasebook = {
     'though you had written them. That is not allowed yet — copy the part you mean ' +
     'into a message of your own.',
   notPassedOn:
-    'Text and photos reach the agent; voice, video and other files are not passed on yet.',
+    'Text, photos and videos reach the agent; voice messages and other files are not passed on yet.',
   mediaNotFetched:
-    'A photo could not be fetched from Telegram, so nothing was sent to the agent. ' +
+    'A photo or video could not be fetched from Telegram, so nothing was sent to the agent. ' +
     'Try sending it again.',
+  tooLargeToFetch:
+    'That file is over 20 MB, more than Telegram lets a bot download. Send it as a video ' +
+    'rather than as a file — Telegram then makes it smaller — or send a shorter clip.',
   turnFailed: 'Something went wrong answering that. The details are in the log.',
   fileNotSent: (id) => `A file that came with the answer could not be sent. (${id})`,
   emptyReply: 'The agent finished without saying anything.',
@@ -75,10 +80,13 @@ const hu: Phrasebook = {
   forwardedRefusal:
     'Egy továbbított üzenet valaki más szavait hozza, és úgy érne el az agenthez, mintha ' +
     'te írtad volna. Ezt egyelőre nem engedem — másold át a lényeget egy saját üzenetbe.',
-  notPassedOn: 'Szöveg és fotó jut el az agenthez; hangüzenet, videó és más fájl egyelőre nem.',
+  notPassedOn: 'Szöveg, fotó és videó jut el az agenthez; hangüzenet és más fájl egyelőre nem.',
   mediaNotFetched:
-    'Egy fotót nem sikerült letölteni a Telegramról, így semmi nem ment az agentnek. ' +
-    'Küldd el újra.',
+    'Egy fotót vagy videót nem sikerült letölteni a Telegramról, így semmi nem ment az ' +
+    'agentnek. Küldd el újra.',
+  tooLargeToFetch:
+    'Ez a fájl 20 MB-nál nagyobb, ennyit a Telegram nem enged letölteni egy botnak. Küldd ' +
+    'videóként (ne fájlként) — akkor a Telegram kisebbre tömöríti —, vagy küldj rövidebb klipet.',
   turnFailed: 'Valami hiba történt a válasz közben. A részletek a naplóban vannak.',
   fileNotSent: (id) => `Egy fájlt nem sikerült elküldeni a válasz mellé. (${id})`,
   emptyReply: 'Az agent nem írt választ.',
@@ -102,7 +110,9 @@ const hu: Phrasebook = {
     ({
       'media-not-an-image':
         'Ez nem olyan kép, amit a rendszer használni tud (JPEG, PNG, WebP vagy GIF).',
-      'media-not-a-video': 'Ez nem olyan videó, amit a rendszer használni tud (MP4).',
+      'media-not-a-video': 'Ez nem olyan videó, amit a rendszer használni tud (MP4 vagy MOV).',
+      'media-not-supported':
+        'Ez nem olyan fotó vagy videó, amit a rendszer használni tud (JPEG, PNG, WebP, GIF, MP4 vagy MOV).',
       'media-too-large': 'Ez a fájl túl nagy ahhoz, hogy az agent megkapja.',
     })[code] ?? said,
 };

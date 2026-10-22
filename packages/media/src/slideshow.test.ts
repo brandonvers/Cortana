@@ -16,6 +16,7 @@ import {
   wrapCaption,
 } from './slideshow.ts';
 import { createMediaStore } from './store.ts';
+import { frameTimes, lookAtVideo } from './video.ts';
 
 let root: string;
 
@@ -124,6 +125,25 @@ describe('the arguments ffmpeg is given', () => {
     expect(args).toContain('-an');
   });
 
+  it('cut a clip: its stretch from where it starts, not looped like a photo', () => {
+    const args = slideshowArgs(
+      [
+        { path: '/store/aaaaaaaaaaaaaaaa.jpg', seconds: 3, captionFile: null },
+        { path: '/store/cccccccccccccccc.mp4', seconds: 5, captionFile: null, from: 2 },
+      ],
+      null,
+      '/tmp/work/out.mp4',
+    );
+    const joined = args.join(' ');
+
+    expect(joined).toContain('-ss 2.00 -t 5.00 -i /store/cccccccccccccccc.mp4');
+    expect(joined).toContain('-loop 1 -framerate 30 -t 3.00 -i /store/aaaaaaaaaaaaaaaa.jpg');
+    expect(args.filter((arg) => arg === '-loop')).toHaveLength(1);
+    // Only the joined picture is mapped out, so a clip's sound goes nowhere.
+    expect(args.slice(args.indexOf('-map'), args.indexOf('-map') + 2)).toEqual(['-map', '[out]']);
+    expect(args).toContain('-an');
+  });
+
   it('refuse a path in the filtergraph that the syntax could read as structure', () => {
     expect(() =>
       slideshowArgs(plan("/tmp/it's:here.txt"), '/tmp/font.ttf', '/tmp/out.mp4'),
@@ -132,7 +152,7 @@ describe('the arguments ffmpeg is given', () => {
 });
 
 const toolkit = findToolkit();
-const ffprobe = toolkit.ffmpeg?.replace(/ffmpeg$/, 'ffprobe') ?? null;
+const ffprobe = toolkit.ffprobe;
 
 describe.skipIf(toolkit.ffmpeg === null || toolkit.font === null)('a real video', () => {
   it('is made from a landscape and a portrait photo, with captions, and kept', async () => {
@@ -177,16 +197,138 @@ describe.skipIf(toolkit.ffmpeg === null || toolkit.font === null)('a real video'
   }, 60_000);
 });
 
+describe('when frames are taken from a clip', () => {
+  it('is about one every three seconds, between three and eight, mid-stretch', () => {
+    expect(frameTimes(6)).toEqual([1, 3, 5]);
+    expect(frameTimes(0.5)).toEqual([0.3]);
+    expect(frameTimes(60)).toHaveLength(8);
+    expect(frameTimes(0)).toEqual([]);
+  });
+});
+
+/** A clip of a moving test pattern, as a phone's video would arrive. */
+function clip(seconds: number): Uint8Array {
+  const file = join(root, `clip-${seconds}.mp4`);
+  execFileSync(toolkit.ffmpeg as string, [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    `testsrc2=size=640x360:rate=30:duration=${seconds}`,
+    '-f',
+    'lavfi',
+    '-i',
+    `sine=frequency=440:duration=${seconds}`,
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-shortest',
+    '-y',
+    file,
+  ]);
+  return readFileSync(file);
+}
+
+describe.skipIf(toolkit.ffmpeg === null || toolkit.ffprobe === null || toolkit.font === null)(
+  'a real clip',
+  () => {
+    it('is measured and shown as frames, each a JPEG', async () => {
+      const store = createMediaStore({ dir: join(root, 'media') });
+      const held = store.accept(clip(6));
+
+      const look = await lookAtVideo(toolkit, store.localPath(held.id) as string);
+
+      expect(look.seconds).toBeCloseTo(6, 0);
+      expect(look.frames.map((frame) => frame.at)).toEqual([1, 3, 5]);
+      for (const frame of look.frames)
+        expect([...frame.data.slice(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+    }, 60_000);
+
+    it('goes between photos, cut to its stretch, with its sound dropped', async () => {
+      const store = createMediaStore({ dir: join(root, 'media') });
+      const photo = store.put(png(640, 480, [200, 30, 30]));
+      const held = store.accept(clip(6));
+
+      const video = await makeSlideshow({
+        store,
+        toolkit,
+        slides: [
+          { id: photo.id, seconds: 1, caption: 'Előtte' },
+          { id: held.id, seconds: 2, caption: 'Közben', from: 3 },
+        ],
+      });
+
+      const probed = JSON.parse(
+        execFileSync(
+          toolkit.ffprobe as string,
+          [
+            '-v',
+            'error',
+            '-show_entries',
+            'stream=codec_type:format=duration',
+            '-of',
+            'json',
+          ].concat(store.localPath(video.id) as string),
+          { encoding: 'utf8' },
+        ),
+      ) as { streams: { codec_type: string }[]; format: { duration: string } };
+      expect(probed.streams.map((stream) => stream.codec_type)).toEqual(['video']);
+      expect(Number(probed.format.duration)).toBeCloseTo(3, 0);
+    }, 60_000);
+
+    it('is refused in a sentence, with its length, when the stretch runs past its end', async () => {
+      const store = createMediaStore({ dir: join(root, 'media') });
+      const held = store.accept(clip(2));
+
+      const error = await makeSlideshow({
+        store,
+        toolkit,
+        slides: [{ id: held.id, seconds: 3, caption: '', from: 1 }],
+      }).catch((caught: unknown) => caught);
+
+      expect(isAppError(error) && error.code).toBe('slideshow-clip-too-short');
+      expect(isAppError(error) && error.message).toContain('is 2.0 seconds long');
+    }, 60_000);
+  },
+);
+
 describe('a video that cannot be made', () => {
+  it('is refused in a sentence when a photo is shown longer than a photo may be', async () => {
+    const store = createMediaStore({ dir: join(root, 'media') });
+    const held = store.put(png(8, 8, [1, 2, 3]));
+    const error = await makeSlideshow({
+      store,
+      toolkit: { ffmpeg: 'ffmpeg', ffprobe: null, font: null },
+      slides: [{ id: held.id, seconds: 11, caption: '' }],
+    }).catch((caught: unknown) => caught);
+
+    expect(isAppError(error) && error.code).toBe('slideshow-photo-too-long');
+  });
+
+  it('is refused in a sentence when a clip cannot be measured here', async () => {
+    const store = createMediaStore({ dir: join(root, 'media') });
+    const held = store.accept(Uint8Array.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 1, 2]));
+    const error = await makeSlideshow({
+      store,
+      toolkit: { ffmpeg: 'ffmpeg', ffprobe: null, font: null },
+      slides: [{ id: held.id, seconds: 2, caption: '' }],
+    }).catch((caught: unknown) => caught);
+
+    expect(isAppError(error) && error.code).toBe('slideshow-no-ffprobe');
+  });
+
   it('is refused in a sentence when a photo is not held', async () => {
     const store = createMediaStore({ dir: join(root, 'media') });
     const error = await makeSlideshow({
       store,
-      toolkit: { ffmpeg: 'ffmpeg', font: null },
+      toolkit: { ffmpeg: 'ffmpeg', ffprobe: null, font: null },
       slides: [{ id: '0000000000000000', seconds: 2, caption: '' }],
     }).catch((caught: unknown) => caught);
 
-    expect(isAppError(error) && error.code).toBe('slideshow-unknown-photo');
+    expect(isAppError(error) && error.code).toBe('slideshow-unknown-file');
   });
 
   it('is refused in a sentence when the machine has no ffmpeg that can caption', async () => {
@@ -194,7 +336,7 @@ describe('a video that cannot be made', () => {
     const held = store.put(png(8, 8, [1, 2, 3]));
     const error = await makeSlideshow({
       store,
-      toolkit: { ffmpeg: null, font: null },
+      toolkit: { ffmpeg: null, ffprobe: null, font: null },
       slides: [{ id: held.id, seconds: 2, caption: '' }],
     }).catch((caught: unknown) => caught);
 

@@ -1,10 +1,10 @@
 /**
  * `make_slideshow`: the first action the kernel runs for the agent.
  *
- * Photos the person sent, named by id, into a vertical video with captions —
- * the assembly itself is `@cortana/media`'s, and this is the action around it:
- * the input the agent may give, what it declares it touches, and the sentence
- * it comes back with.
+ * Photos and clips the person sent, named by id, into a vertical video with
+ * captions — the assembly itself is `@cortana/media`'s, and this is the action
+ * around it: the input the agent may give, what it declares it touches, and the
+ * sentence it comes back with.
  *
  * It declares no write. It adds a new file to the system's own store and
  * changes nothing that existed, which is not what `confirm = "writes"` exists to
@@ -12,42 +12,51 @@
  * else has seen is not one. Nor does it reach the network.
  */
 
-import { makeSlideshow, type Toolkit } from '@cortana/media';
+import { MAX_CLIP_SECONDS, makeSlideshow, type Toolkit, VIDEO_TYPE } from '@cortana/media';
 import { z } from 'zod';
 import type { KernelAction } from './actions.ts';
 
-/** The longest video one action makes. A clip, not a film. */
+/** The longest video one action makes. A short, not a film. */
 const MAX_TOTAL_SECONDS = 120;
 
 const input = z
   .object({
-    photos: z
+    slides: z
       .array(
         z.object({
           id: z
             .string()
             .regex(/^[0-9a-f]{16}$/, 'an id is sixteen hex digits, as you were given it'),
-          seconds: z.number().min(1).max(10).default(3),
+          // How long each kind may be is the slideshow's to say: only the store
+          // knows which an id is.
+          seconds: z.number().min(1).max(MAX_CLIP_SECONDS).default(3),
           caption: z.string().max(120).default(''),
+          from: z.number().min(0).default(0),
         }),
       )
       .min(1)
       .max(30),
   })
   .refine(
-    (value) => value.photos.reduce((total, photo) => total + photo.seconds, 0) <= MAX_TOTAL_SECONDS,
-    { message: `the whole video may be at most ${MAX_TOTAL_SECONDS} seconds`, path: ['photos'] },
+    (value) => value.slides.reduce((total, slide) => total + slide.seconds, 0) <= MAX_TOTAL_SECONDS,
+    { message: `the whole video may be at most ${MAX_TOTAL_SECONDS} seconds`, path: ['slides'] },
   );
+
+const counted = (count: number, one: string, many: string): string =>
+  `${count} ${count === 1 ? one : many}`;
 
 export function slideshowAction(toolkit: Toolkit): KernelAction<z.infer<typeof input>> {
   return {
     name: 'make_slideshow',
     description:
-      'turns photos you were sent into a vertical 1080×1920 video for TikTok or Reels — one ' +
-      'photo after another, each for its own number of seconds (1–10), each with an optional ' +
-      'short caption drawn over it. No sound: the person adds it on the platform.',
+      'turns photos and video clips you were sent into one vertical 1080×1920 video for ' +
+      'TikTok or Reels — one slide after another, each with an optional short caption drawn ' +
+      'over it. A photo is shown for its seconds (1–10). A clip is cut: `seconds` of it ' +
+      `(1–${MAX_CLIP_SECONDS}), starting \`from\` seconds in — use the frames you were shown ` +
+      'to choose the stretch. No sound, a clip’s own included: the person adds it on the platform.',
     input:
-      '{"photos":[{"id":"<id of a photo you were sent>","seconds":3,"caption":"A few words"}]}',
+      '{"slides":[{"id":"<id of a photo>","seconds":3,"caption":"A few words"},' +
+      '{"id":"<id of a clip>","from":2,"seconds":5,"caption":"A few words"}]}',
     writes: false,
     network: false,
     schema: input,
@@ -55,13 +64,21 @@ export function slideshowAction(toolkit: Toolkit): KernelAction<z.infer<typeof i
       const video = await makeSlideshow({
         store: context.store,
         toolkit,
-        slides: value.photos,
+        slides: value.slides,
       });
-      const seconds = value.photos.reduce((total, photo) => total + photo.seconds, 0);
+      const seconds = value.slides.reduce((total, slide) => total + slide.seconds, 0);
+      const clips = value.slides.filter(
+        (slide) => context.store.get(slide.id)?.mediaType === VIDEO_TYPE,
+      ).length;
+      const photos = value.slides.length - clips;
+      const made = [
+        photos > 0 ? counted(photos, 'photo', 'photos') : null,
+        clips > 0 ? counted(clips, 'clip', 'clips') : null,
+      ]
+        .filter((part) => part !== null)
+        .join(' and ');
       return {
-        summary:
-          `made a ${seconds}-second vertical video from ${value.photos.length} ` +
-          `photo${value.photos.length === 1 ? '' : 's'}, held as ${video.id}`,
+        summary: `made a ${seconds}-second vertical video from ${made}, held as ${video.id}`,
         files: [video.id],
       };
     },

@@ -151,6 +151,23 @@ text is ever parsed as a filter.
 > in the configuration, English unless set. What the agent is told stays in
 > English: the model reads it and answers in the person's language. The policy
 > engine's reason under an approval is still its own English sentence.
+>
+> **Found in use, second.** The owner sent a short clip to go between the
+> photos, and it was turned away: only stills were passed on. A clip is now
+> working material too. Telegram's video, round video and video-as-a-file
+> arrive the way photos do; the store accepts what a person sends by its bytes
+> (an image, or an MP4/QuickTime container) and refuses the rest in a
+> sentence; a file over Telegram's 20 MB download limit is answered before a
+> byte is fetched. The provider is shown pictures, never video, so the agent
+> is shown a clip as frames — about one every three seconds, three to eight,
+> each with the second it was taken at — and told it is a clip, so it can ask
+> for a stretch by time. `make_slideshow` takes `slides`, each a photo or a
+> clip, and cuts a clip `from` a second for its `seconds`, fitted to 9:16 the
+> way a photo is, its sound dropped. A stretch past a clip's end is refused
+> with the clip's length, so the agent can ask again. Checked by eye as well
+> as by test: a landscape clip cut from its second second sits whole over its
+> blurred fill, captioned, and the made video has a video stream and nothing
+> else.
 
 **5. Notes.** `remember` and `forget` are tools; notes live in the database and
 are composed into the agent's prompt at every wake. Writing one is a write, so
